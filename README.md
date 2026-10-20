@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/graiz/hushhh/releases/latest"><img alt="Download for Mac" src="https://img.shields.io/badge/Download%20for%20Mac-6A4CF0?style=for-the-badge&logo=apple&logoColor=white" height="40"></a>
+</p>
+
+<p align="center">
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-6A4CF0?style=flat-square&logo=apple&logoColor=white">
   <img alt="Apple silicon" src="https://img.shields.io/badge/Apple%20silicon-required-6A4CF0?style=flat-square">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6A4CF0?style=flat-square"></a>
@@ -22,6 +26,10 @@
 
 > [!NOTE]
 > While Hushhh is running, **Caps Lock is used for dictation** instead of capitals. Quitting Hushhh gives it back.
+
+## Install
+
+Download the DMG from the [latest release](https://github.com/graiz/hushhh/releases/latest), open it, and drag Hushhh to Applications. It's signed and notarized by Apple. On first launch, Hushhh asks for Microphone and Accessibility access (see [Permissions](#permissions)).
 
 ## How to use it
 
