@@ -209,7 +209,7 @@ final class OverlayController {
         let caret = style.caret
         let font = style.font ?? NSFont.systemFont(ofSize: min(28, max(11, caret.height / 1.25)))
         // Apps that don't report a text colour get system grey, readable on light and dark themes.
-        let color = Self.debugGhostColor ?? style.color.map { $0.withAlphaComponent(0.55) } ?? NSColor.systemGray
+        let color = Self.debugGhostColor ?? style.color.map { $0.withAlphaComponent(0.55) } ?? Self.fallbackGhostColor
         let visibleFrame = screen(containing: CGPoint(x: caret.midX, y: caret.midY)).visibleFrame
         var lineStartX = style.lineStartX
         var width = max(160, style.rightEdgeX - style.lineStartX)
@@ -325,6 +325,11 @@ final class OverlayController {
     }
 
     private static let lineMetrics = NSLayoutManager()
+    /// Ghost text for apps that don't report a text colour: a mid grey with at least
+    /// 4.5:1 contrast on white (light) or near-black (dark) pages.
+    static let fallbackGhostColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 0.62, alpha: 1) : NSColor(white: 0.42, alpha: 1)
+    }
     /// Alignment tests draw the ghost text in a solid colour and hide the chip.
     static var debugGhostColor: NSColor?
     /// Longer dictation shows only its newest lines, so it can't cover the page.
@@ -407,11 +412,13 @@ final class GhostContainerView: NSView {
         }
 
         last = (firstLineIndent, width, result.size.height, result.firstLineHeight, result.lines, string.isEmpty)
+        lastLineRects = result.lineRects
         return (result.size, result.lineHeight)
     }
 
     private var last: (indent: CGFloat, width: CGFloat, height: CGFloat, firstLineHeight: CGFloat, lines: Int, empty: Bool)
         = (0, 0, 0, 0, 0, true)
+    private var lastLineRects: [CGRect] = []
 
     /// Positions the text inside the panel and shapes the scrim. `cover` is selected
     /// text (in this view's coordinates) that the scrim must hide.
@@ -419,9 +426,7 @@ final class GhostContainerView: NSView {
         text.frame = CGRect(origin: textOrigin, size: CGSize(width: last.width, height: last.height))
         scrim.frame = bounds
         scrim.fill = Self.backdrop(for: textColor)
-        scrim.shape = Self.shape(textOrigin: textOrigin, width: last.width, height: last.height,
-                                 firstLineIndent: last.indent, firstLineHeight: last.firstLineHeight,
-                                 lines: last.lines, cover: cover)
+        scrim.shape = Self.shape(textOrigin: textOrigin, lineRects: lastLineRects, cover: cover)
         scrim.needsDisplay = true
 
         let wantsScrim = last.lines >= 2 || (cover != nil && !last.empty)
@@ -449,28 +454,33 @@ final class GhostContainerView: NSView {
         return luminance < 0.5 ? NSColor(white: 1, alpha: 0.96) : NSColor(white: 0.12, alpha: 0.96)
     }
 
-    /// The text's outline: the first line from the caret onwards, then full-width lines
-    /// below, plus any selected text being replaced.
-    private static func shape(textOrigin: CGPoint, width: CGFloat, height: CGFloat,
-                              firstLineIndent: CGFloat, firstLineHeight: CGFloat, lines: Int, cover: CGRect?) -> NSBezierPath {
+    /// The ghost text's outline: each line's own extent, padded and merged, so the
+    /// backdrop hugs the words (like a text highlight) instead of the whole field.
+    /// Also covers any selected text being replaced.
+    private static func shape(textOrigin: CGPoint, lineRects: [CGRect], cover: CGRect?) -> NSBezierPath {
         let pad = padding - 3   // leave room inside the panel for the shadow
-        let radius: CGFloat = 8
-        let left = textOrigin.x - pad
-        let top = textOrigin.y - pad
-        let full = CGRect(x: left, y: top, width: width + 2 * pad, height: height + 2 * pad)
+        let radius: CGFloat = 7
         let path = NSBezierPath()
-        let firstX = left + max(0, firstLineIndent + pad - 6)
-        if lines <= 1 || firstX - left < radius * 2 {
-            // Starts at (or near) the left margin: one rounded rectangle, no notch.
-            path.append(NSBezierPath(roundedRect: lines <= 1
-                ? CGRect(x: firstX, y: top, width: full.maxX - firstX, height: full.height) : full,
-                xRadius: radius, yRadius: radius))
-        } else {
-            let first = CGRect(x: firstX, y: top, width: full.maxX - firstX, height: firstLineHeight + pad + radius)
-            let rest = CGRect(x: left, y: top + firstLineHeight + pad, width: full.width, height: full.height - firstLineHeight - pad)
-            path.append(NSBezierPath(roundedRect: first, xRadius: radius, yRadius: radius))
-            path.append(NSBezierPath(roundedRect: rest, xRadius: radius, yRadius: radius))
-            path.append(NSBezierPath(rect: CGRect(x: first.minX, y: rest.minY, width: first.width, height: radius)))
+        let boxes = lineRects.enumerated().map { index, line -> CGRect in
+            let top: CGFloat = index == 0 ? pad : 0
+            let bottom: CGFloat = index == lineRects.count - 1 ? pad : 0
+            // A first line that continues after existing text starts right at the caret,
+            // so the backdrop never covers the character before it.
+            let left: CGFloat = index == 0 && line.minX > 1 ? 1 : pad
+            return CGRect(x: textOrigin.x + line.minX - left, y: textOrigin.y + line.minY - top,
+                          width: line.width + left + pad, height: line.height + top + bottom)
+        }
+        for (index, box) in boxes.enumerated() {
+            path.append(NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius))
+            // Join consecutive lines where they overlap so there's no seam between them.
+            if index + 1 < boxes.count {
+                let next = boxes[index + 1]
+                let left = max(box.minX, next.minX), right = min(box.maxX, next.maxX)
+                if right > left {
+                    path.append(NSBezierPath(rect: CGRect(x: left, y: box.maxY - radius, width: right - left,
+                                                          height: next.minY - box.maxY + 2 * radius)))
+                }
+            }
         }
         if let cover { path.append(NSBezierPath(roundedRect: cover, xRadius: 4, yRadius: 4)) }
         path.windingRule = .nonZero
@@ -518,7 +528,7 @@ final class GhostTextView: NSView {
     override var isFlipped: Bool { true }
 
     func update(text: String, font: NSFont, color: NSColor, firstLineIndent: CGFloat, width: CGFloat)
-        -> (size: CGSize, lineHeight: CGFloat, lines: Int, firstLineHeight: CGFloat) {
+        -> (size: CGSize, lineHeight: CGFloat, lines: Int, firstLineHeight: CGFloat, lineRects: [CGRect]) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.firstLineHeadIndent = firstLineIndent
         paragraph.lineBreakMode = .byWordWrapping
@@ -530,18 +540,21 @@ final class GhostTextView: NSView {
         let used = layoutManager.usedRect(for: container)
         let lineHeight = layoutManager.defaultLineHeight(for: font)
         var lines = 0
+        var lineRects: [CGRect] = []
         var firstLineHeight = lineHeight
         let glyphs = layoutManager.glyphRange(for: container)
         var index = glyphs.location
         while index < NSMaxRange(glyphs) {
             var range = NSRange()
             let rect = layoutManager.lineFragmentRect(forGlyphAt: index, effectiveRange: &range)
+            let used = layoutManager.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: nil)
+            lineRects.append(CGRect(x: used.minX, y: rect.minY, width: used.width, height: rect.height))
             if lines == 0 { firstLineHeight = rect.height }
             lines += 1
             index = NSMaxRange(range)
         }
         needsDisplay = true
-        return (CGSize(width: width, height: ceil(used.height)), lineHeight, max(lines, text.isEmpty ? 0 : 1), firstLineHeight)
+        return (CGSize(width: width, height: ceil(used.height)), lineHeight, max(lines, text.isEmpty ? 0 : 1), firstLineHeight, lineRects)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -579,11 +592,11 @@ struct OverlayView: View {
                     HStack(spacing: 8) {
                         indicator.frame(width: 20, height: 16)
                         if model.phase == .finishing {
-                            Text(model.busyLabel ?? "Finishing…").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text(model.busyLabel ?? "Finishing…").font(.system(size: 13)).foregroundStyle(.secondary)
                         } else if model.showHint {
-                            HintRow(insertLabel: "Done", showPolish: model.canPolish)
+                            HintRow(insertLabel: "Insert", showPolish: model.canPolish)
                         } else {
-                            Text(model.engineLoading ? "Loading model…" : "Listening").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text(model.engineLoading ? "Loading model…" : "Listening").font(.system(size: 13)).foregroundStyle(.secondary)
                         }
                     }
                 } else {
@@ -593,9 +606,9 @@ struct OverlayView: View {
                         transcript
                     }
                     if let busy = model.busyLabel, model.phase == .finishing {
-                        Text(busy).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(busy).font(.system(size: 13)).foregroundStyle(.secondary)
                     } else if model.showHint && model.phase == .listening {
-                        HintRow(insertLabel: "Done", showPolish: model.canPolish)
+                        HintRow(insertLabel: "Insert", showPolish: model.canPolish)
                     }
                 }
             }
@@ -660,7 +673,7 @@ private struct HintRow: View {
             }
             HStack(spacing: 4) { KeyCap("esc"); Text("Cancel") }
         }
-        .font(.system(size: 12))
+        .font(.system(size: 13))
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .fixedSize()
@@ -673,7 +686,7 @@ struct KeyCap: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(.quaternary))

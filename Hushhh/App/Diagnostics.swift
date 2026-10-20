@@ -281,13 +281,18 @@ enum Diagnostics {
             print("rest \(rest.debugDescription)")
             print("display \(shown)")
             guard phase == "draw" else { exit(0) }
-            OverlayController.debugGhostColor = .systemRed
+            // --hero: draw exactly what a person sees (grey ghost text, full key hints),
+            // for screenshots; otherwise solid red for pixel comparison.
+            let hero = args.contains("--hero")
+            OverlayController.debugGhostColor = hero ? nil : .systemRed
             let overlay = OverlayController()
-            overlay.model.showHint = false
+            overlay.model.showHint = hero
+            overlay.model.canPolish = hero
+            overlay.model.level = hero ? 0.55 : 0
             overlay.model.text = shown
             overlay.show(anchor: .inline(style))
             print("drawn")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { exit(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (hero ? 6 : 2.5)) { exit(0) }
         }
     }
 
