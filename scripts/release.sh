@@ -58,12 +58,19 @@ echo "==> Building the DMG"
 swift "$ROOT/scripts/dmg-background.swift" "$OUT" >/dev/null
 tiffutil -cathidpicheck "$OUT/background.png" "$OUT/background@2x.png" -out "$OUT/background.tiff" >/dev/null
 mkdir -p "$OUT/dmg-source" && cp -R "$APP" "$OUT/dmg-source/"
-# Signing the DMG itself needs a Developer ID certificate in the keychain. Xcode's
-# cloud-managed certificate can't be used here; that's fine, because Gatekeeper checks
-# the app inside, which is signed, notarized and stapled.
+# The DMG is signed and notarized only when both a local Developer ID certificate and a
+# notarytool profile exist (a signed DMG that isn't notarized is rejected by Gatekeeper).
+# Otherwise it stays unsigned, which is fine: Gatekeeper checks the notarized app inside.
+#   xcrun notarytool store-credentials hushhh-notary --apple-id <id> --team-id <team>
+PROFILE=${NOTARY_PROFILE:-hushhh-notary}
 IDENTITY=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application: .*($TEAM)\)\".*/\1/p" | head -1)
 SIGN_ARGS=()
-if [ -n "$IDENTITY" ]; then SIGN_ARGS=(--codesign "$IDENTITY"); else echo "    (no local Developer ID certificate; the DMG is unsigned, the app inside is notarized)"; fi
+if [ -n "$IDENTITY" ] && xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+  SIGN_ARGS=(--codesign "$IDENTITY" --notarize "$PROFILE")
+else
+  IDENTITY=""
+  echo "    (DMG left unsigned; to sign and notarize it, add a Developer ID certificate and the $PROFILE notarytool profile)"
+fi
 DMG="$OUT/Hushhh-$VERSION.dmg"
 create-dmg \
   --volname "Hushhh" \
@@ -79,5 +86,8 @@ create-dmg \
   ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} \
   "$DMG" "$OUT/dmg-source" >/dev/null
 
-[ -n "$IDENTITY" ] && codesign --verify --verbose=1 "$DMG"
+if [ -n "$IDENTITY" ]; then
+  xcrun stapler validate "$DMG"
+  spctl -a -t open --context context:primary-signature "$DMG"
+fi
 echo "==> Done: $DMG ($(du -h "$DMG" | cut -f1))"
