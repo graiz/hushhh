@@ -16,7 +16,7 @@ for tool in cmake git; do
 done
 
 if [ ! -f "$SRC/CMakeLists.txt" ]; then
-  echo "Fetching QVAC TranscribePsy at $QVAC_COMMIT…"
+  echo "Fetching QVAC TranscribePsy at ${QVAC_COMMIT}..."
   rm -rf "$SRC"
   git init -q "$SRC"
   git -C "$SRC" remote add origin "$QVAC_REPO"
