@@ -1,0 +1,16 @@
+// Shared build settings. Signing and bundle identity default to an ad-hoc build that
+// anyone can compile; put your own team and bundle prefix in Config/Local.xcconfig
+// (git-ignored), e.g.:
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   CODE_SIGN_STYLE = Automatic
+//   CODE_SIGN_IDENTITY = Apple Development
+//   HUSHHH_BUNDLE_PREFIX = com.example
+
+HUSHHH_BUNDLE_PREFIX = com.graizlabs
+PRODUCT_BUNDLE_IDENTIFIER = $(HUSHHH_BUNDLE_PREFIX).hushhh
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
