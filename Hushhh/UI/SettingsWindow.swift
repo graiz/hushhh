@@ -3,20 +3,22 @@ import SwiftUI
 import ServiceManagement
 
 enum SettingsTab: Int, CaseIterable {
-    case general, models, polish, permissions
+    case general, typing, models, polish, permissions
 
     var title: String {
         switch self {
         case .general: "General"
+        case .typing: "Typing"
         case .models: "Models"
         case .polish: "Polish"
-        case .permissions: "Permissions"
+        case .permissions: "Privacy"
         }
     }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .typing: "keyboard"
         case .models: "waveform"
         case .polish: "wand.and.stars"
         case .permissions: "hand.raised"
@@ -34,6 +36,7 @@ final class SettingsWindowController: NSWindowController {
         for tab in SettingsTab.allCases {
             let root: AnyView = switch tab {
             case .general: AnyView(GeneralSettings())
+            case .typing: AnyView(TypingSettings())
             case .models: AnyView(ModelSettings())
             case .polish: AnyView(PolishSettings())
             case .permissions: AnyView(PermissionSettings())
@@ -80,58 +83,12 @@ struct GeneralSettings: View {
                 LabeledContent("Dictation key") { KeyCap("⇪ Caps Lock") }
                 Toggle("Hold to talk", isOn: $prefs.holdToTalk)
             } footer: {
-                SettingsFooter("Press Caps Lock once to start dictating and again when you’re done. Press Esc to cancel and remove what was typed. With Hold to talk, you can also hold Caps Lock while speaking and release it to finish.")
-            }
-
-            Section {
-                Toggle("Type words as you speak", isOn: $prefs.liveTyping)
-                if prefs.liveTyping {
-                    LabeledContent("Wait before typing") {
-                        HStack {
-                            Slider(value: $prefs.commitDelay, in: 1...6, step: 0.5)
-                                .frame(width: 160)
-                                .accessibilityValue("\(prefs.commitDelay, specifier: "%.1f") seconds")
-                            Text("\(prefs.commitDelay, specifier: "%.1f") s")
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, alignment: .trailing)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                }
-            } header: {
-                Text("Live Typing")
-            } footer: {
-                SettingsFooter(prefs.liveTyping
-                     ? "Recent words appear as grey ghost text while Hushhh settles on them, then they’re typed into the field. A longer wait gives more accurate text. Esc and Tab replace typed text only in apps that let Hushhh select it."
-                     : "Your words appear as grey ghost text and nothing is typed until you press Caps Lock (or Tab to polish). Esc leaves the document untouched.")
-            }
-
-            Section {
-                Picker("Insert method", selection: $prefs.insertion) {
-                    ForEach(InsertionMethod.allCases) { Text($0.title).tag($0) }
-                }
-                Toggle("Add a space before dictated text when needed", isOn: $prefs.smartSpacing)
-            } header: {
-                Text("Inserting Text")
-            } footer: {
-                SettingsFooter((prefs.liveTyping ? "Used when Live Typing is off. " : "")
-                    + (prefs.insertion == .paste
-                       ? "Pasting is fastest and works in most apps. Your clipboard is restored afterward."
-                       : "Typing works in apps that block pasting, but is slower for long passages."))
+                SettingsFooter("Press Caps Lock to start and again to insert; Esc cancels. With Hold to talk, hold Caps Lock while speaking and release it to insert.")
             }
 
             Section("Feedback") {
                 Toggle("Play sounds", isOn: $prefs.playSounds)
                 Toggle("Show keyboard hints while listening", isOn: $prefs.showHints)
-            }
-
-            Section {
-                Toggle("Write a diagnostic log", isOn: $prefs.diagnosticLog)
-            } header: {
-                Text("Troubleshooting")
-            } footer: {
-                SettingsFooter("Records where apps report the text cursor (positions, field sizes and font names, never your text) to ~/Library/Logs/Hushhh/focus.log, to help fix ghost-text placement.")
             }
 
             Section {
@@ -153,6 +110,102 @@ struct GeneralSettings: View {
             Button("OK") { loginError = nil }
         } message: {
             Text(loginError ?? "")
+        }
+    }
+}
+
+struct TypingSettings: View {
+    @EnvironmentObject private var prefs: Preferences
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Type words as you speak", isOn: $prefs.liveTyping)
+                if prefs.liveTyping {
+                    LabeledContent("Wait before typing") {
+                        HStack {
+                            Slider(value: $prefs.commitDelay, in: 1...6, step: 0.5)
+                                .frame(width: 160)
+                                .accessibilityValue("\(prefs.commitDelay, specifier: "%.1f") seconds")
+                            Text("\(prefs.commitDelay, specifier: "%.1f") s")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, alignment: .trailing)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+            } header: {
+                Text("Live Typing")
+            } footer: {
+                SettingsFooter(prefs.liveTyping
+                     ? "Settled words are typed into the field as you speak; the newest stay as ghost text. A longer wait is more accurate."
+                     : "Words stay as ghost text until you press Caps Lock, so nothing changes in the document until then.")
+            }
+
+            Section {
+                Picker("Insert method", selection: $prefs.insertion) {
+                    ForEach(InsertionMethod.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Add a space before dictated text when needed", isOn: $prefs.smartSpacing)
+            } header: {
+                Text("Inserting Text")
+            } footer: {
+                SettingsFooter(prefs.insertion == .paste
+                    ? "Pasting is fastest and works in most apps; your clipboard is restored afterward."
+                    : "Typing works in apps that block pasting, but is slower for long text.")
+            }
+
+        }
+        .formStyle(.grouped)
+        .frame(width: 500)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// An editable dropdown (NSComboBox): pick a suggested model or type any name.
+struct ModelComboBox: NSViewRepresentable {
+    @Binding var text: String
+    let items: [String]
+    let placeholder: String
+
+    func makeNSView(context: Context) -> NSComboBox {
+        let box = NSComboBox()
+        box.usesDataSource = false
+        box.completes = true
+        box.numberOfVisibleItems = 12
+        box.placeholderString = placeholder
+        box.delegate = context.coordinator
+        box.target = context.coordinator
+        box.action = #selector(Coordinator.changed(_:))
+        return box
+    }
+
+    func updateNSView(_ box: NSComboBox, context: Context) {
+        context.coordinator.parent = self
+        if box.objectValues as? [String] != items {
+            box.removeAllItems()
+            box.addItems(withObjectValues: items)
+        }
+        if box.stringValue != text { box.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSComboBoxDelegate {
+        var parent: ModelComboBox
+        init(_ parent: ModelComboBox) { self.parent = parent }
+
+        @objc func changed(_ sender: NSComboBox) { parent.text = sender.stringValue }
+
+        func controlTextDidChange(_ notification: Notification) {
+            if let box = notification.object as? NSComboBox { parent.text = box.stringValue }
+        }
+
+        func comboBoxSelectionDidChange(_ notification: Notification) {
+            guard let box = notification.object as? NSComboBox, box.indexOfSelectedItem >= 0,
+                  let value = box.itemObjectValue(at: box.indexOfSelectedItem) as? String else { return }
+            parent.text = value
         }
     }
 }
@@ -317,6 +370,8 @@ struct PolishSettings: View {
     @State private var keyError: String?
     @FocusState private var keyFieldFocused: Bool
     @State private var testState: TestState = .idle
+    /// Models the provider reports for this key, merged into the suggestions.
+    @State private var fetchedModels: [String] = []
     /// Custom is shown while the person types a model ID, even before it's valid.
     @State private var customModel = false
 
@@ -340,7 +395,12 @@ struct PolishSettings: View {
                 }
                 if prefs.polishProvider.usesEndpoint {
                     TextField("Base URL", text: $prefs.polishBaseURL, prompt: Text(prefs.polishProvider.defaultBaseURL))
-                    TextField("Model", text: $prefs.polishModel, prompt: Text(prefs.polishProvider.defaultModel))
+                    LabeledContent("Model") {
+                        ModelComboBox(text: $prefs.polishModel,
+                                      items: modelChoices,
+                                      placeholder: prefs.polishProvider.defaultModel)
+                            .frame(width: 260)
+                    }
                     SecureField("API key", text: $apiKey, prompt: Text(prefs.polishProvider == .custom ? "Optional" : "Required"))
                         .focused($keyFieldFocused)
                         .onSubmit { saveKey() }
@@ -387,9 +447,13 @@ struct PolishSettings: View {
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             loadKey()
+            loadModels()
             customModel = prefs.polishProvider == .claudeCode && ClaudeModel(alias: prefs.polishModel) == .custom
         }
+        .onChange(of: prefs.polishBaseURL) { _, _ in loadModels() }
         .onChange(of: prefs.polishProvider) { _, provider in
+            fetchedModels = []
+            loadModels()
             customModel = provider == .claudeCode && ClaudeModel(alias: prefs.polishModel) == .custom
             loadKey()
             testState = .idle
@@ -432,9 +496,26 @@ struct PolishSettings: View {
         }
     }
 
+    /// Common models first, then anything else the provider offers this account.
+    private var modelChoices: [String] {
+        let common = prefs.polishProvider.suggestedModels
+        return common + fetchedModels.filter { !common.contains($0) }
+    }
+
+    private func loadModels() {
+        let provider = prefs.polishProvider
+        guard provider.usesEndpoint, let url = URL(string: prefs.polishBaseURL) else { fetchedModels = []; return }
+        let key = Keychain.read(account: provider.rawValue)
+        Task {
+            let models = await OpenAICompatiblePolisher.availableModels(baseURL: url, apiKey: key)
+            if prefs.polishProvider == provider { fetchedModels = models }
+        }
+    }
+
     private func saveKey() {
         keyError = Keychain.save(apiKey, account: prefs.polishProvider.rawValue)
             ? nil : "Couldn’t save the key to the Keychain."
+        loadModels()
     }
 
     private func loadKey() {
@@ -459,6 +540,7 @@ struct PolishSettings: View {
 
 struct PermissionSettings: View {
     @EnvironmentObject private var permissions: Permissions
+    @EnvironmentObject private var prefs: Preferences
 
     var body: some View {
         Form {
@@ -476,6 +558,14 @@ struct PermissionSettings: View {
             } footer: {
                 SettingsFooter("While Hushhh is running, Caps Lock is reserved for dictation. Quitting Hushhh restores it.")
             }
+            Section {
+                Toggle("Write a diagnostic log", isOn: $prefs.diagnosticLog)
+            } header: {
+                Text("Troubleshooting")
+            } footer: {
+                SettingsFooter("Logs where apps report the text cursor (never your text) to ~/Library/Logs/Hushhh/focus.log, to help fix ghost-text placement.")
+            }
+
         }
         .formStyle(.grouped)
         .frame(width: 500)

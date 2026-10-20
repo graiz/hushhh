@@ -25,6 +25,17 @@ enum PolishProvider: String, CaseIterable, Identifiable {
 
     var usesEndpoint: Bool { self != .claudeCode }
 
+    /// Common choices offered in the model dropdown (any other name can be typed).
+    var suggestedModels: [String] {
+        switch self {
+        case .claudeCode: ["haiku", "sonnet", "opus"]
+        case .openAI: ["gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1", "gpt-4o-mini", "gpt-4o"]
+        case .openRouter: ["anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5", "openai/gpt-5-mini",
+                           "openai/gpt-4.1-mini", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"]
+        case .custom: ["llama3.2", "llama3.1", "qwen2.5", "mistral", "gemma3"]
+        }
+    }
+
     var defaultBaseURL: String {
         switch self {
         case .claudeCode: ""
@@ -251,6 +262,24 @@ struct OpenAICompatiblePolisher: TextPolisher {
     let baseURL: URL
     let model: String
     let apiKey: String?
+
+    /// Chat models the endpoint offers (GET /models), for the model dropdown. Returns []
+    /// on any error; the dropdown then just shows the common suggestions.
+    static func availableModels(baseURL: URL, apiKey: String?) async -> [String] {
+        guard isAllowed(baseURL) else { return [] }
+        var request = URLRequest(url: baseURL.appendingPathComponent("models"))
+        request.timeoutInterval = 10
+        if let apiKey, !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = json["data"] as? [[String: Any]] else { return [] }
+        // OpenAI also lists embedding, audio and image models; keep chat ones.
+        let skip = ["embedding", "tts", "whisper", "audio", "realtime", "transcribe", "image", "dall-e", "moderation", "search"]
+        return list.compactMap { $0["id"] as? String }
+            .filter { id in !skip.contains { id.localizedCaseInsensitiveContains($0) } }
+            .sorted()
+    }
 
     /// API keys only travel over HTTPS, except to a server on this Mac.
     static func isAllowed(_ url: URL) -> Bool {
