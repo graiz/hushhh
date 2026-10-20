@@ -269,7 +269,7 @@ struct OpenAICompatiblePolisher: TextPolisher {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey, !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         // OpenRouter uses these to attribute traffic; other servers ignore them.
-        request.setValue("https://github.com/graizlabs/hushhh", forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("https://github.com/graiz/hushhh", forHTTPHeaderField: "HTTP-Referer")
         request.setValue("Hushhh", forHTTPHeaderField: "X-Title")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
