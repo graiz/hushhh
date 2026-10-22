@@ -155,15 +155,17 @@ struct FocusContext {
         var source: CaretSource = caret != nil ? .accessibility : .none
         var fallbackInline: InlineStyle?
 
-        // Rich web editors that answer index lookups with nothing: ask with text markers.
-        if caret == nil, isWeb, let found = TextMarkerCaret.locate(element) {
+        // Rich web editors that answer index lookups with nothing: ask with text markers,
+        // but only in editable content, since a page's own selection is not a typing caret.
+        if caret == nil, isWeb, isEditable || copyElement(element, "AXEditableAncestor") != nil,
+           let found = TextMarkerCaret.locate(element) {
             let markerCaret = toCocoa(found.caret)
             caret = markerCaret
             source = .textMarker
             if preceding == nil, let c = found.preceding, !c.isZeroWidth { preceding = c }
             if following == nil, let c = found.following, !c.isZeroWidth { following = c }
             // A caret inside an editable region means the page takes typing here.
-            if copyElement(element, "AXEditableAncestor") != nil { isEditable = true }
+            isEditable = true
             let style = textStyle(from: found.attributes, pid: targetPID)
             let rightEdge = frame.map { max(markerCaret.maxX + 120, $0.maxX) } ?? markerCaret.minX + 480
             var built = InlineStyle(caret: markerCaret, font: style.font, color: style.color,

@@ -38,9 +38,11 @@ enum TextMarkerCaret {
             } else {
                 caret = CGRect(x: box.maxX, y: box.minY, width: 1, height: box.height)
             }
-        } else if let next = marker(host, "AXNextTextMarkerForTextMarker", start),
+        } else if before == nil || preceding?.isNewline == true,
+                  let next = marker(host, "AXNextTextMarkerForTextMarker", start),
                   let box = bounds(host, range(start, next)).flatMap(usable), box.width > 0 {
             // At the start of a line: the leading edge of the character after the caret.
+            // With an unusable preceding box this is skipped, as the next character may sit on the next line.
             caret = CGRect(x: box.minX, y: box.minY, width: 1, height: box.height)
         } else if let zero {
             caret = CGRect(x: zero.minX, y: zero.minY, width: 1, height: zero.height)
@@ -49,7 +51,8 @@ enum TextMarkerCaret {
 
         let attributed = before.flatMap { attributedString(host, $0) }
         let attributes = attributed.map { $0.length > 0 ? $0.attributes(at: 0, effectiveRange: nil) : [:] } ?? [:]
-        let selection = CFEqual(start, end) ? nil : bounds(host, selected).flatMap(usable)
+        // Markers can differ by node yet sit at one position, so require a visible width.
+        let selection = CFEqual(start, end) ? nil : bounds(host, selected).flatMap(usable).flatMap { $0.width > 1 ? $0 : nil }
         return Result(caret: caret, lineStartX: lineStartX(host, start), preceding: preceding, following: following,
                       attributes: attributes, selection: selection)
     }
