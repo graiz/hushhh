@@ -5,10 +5,12 @@ DERIVED := build/DerivedData
 APP := $(DERIVED)/Build/Products/Release/Hushhh.app
 DMG := build/release/Hushhh-$(VERSION).dmg
 
-.PHONY: help project build install deploy publish clean
+.PHONY: help project build debug test install deploy publish clean
 
 help:
 	@echo "make build    Build a Release app (build/DerivedData)"
+	@echo "make debug    Build a Debug app (build/DerivedData) for developer diagnostics"
+	@echo "make test     Run the unit tests"
 	@echo "make install  Build, copy to /Applications and relaunch Hushhh"
 	@echo "make deploy   Build a signed, notarized DMG ($(DMG))"
 	@echo "make publish  Upload the DMG to a GitHub release v$(VERSION) (runs deploy first if needed)"
@@ -19,6 +21,12 @@ project:
 
 build: project
 	xcodebuild -project Hushhh.xcodeproj -scheme Hushhh -configuration Release -derivedDataPath $(DERIVED) build -quiet
+
+debug: project
+	xcodebuild -project Hushhh.xcodeproj -scheme Hushhh -configuration Debug -derivedDataPath $(DERIVED) build -quiet
+
+test: project
+	xcodebuild -project Hushhh.xcodeproj -scheme HushhhTests -configuration Debug -derivedDataPath $(DERIVED) test -quiet
 
 install: build
 	@pkill -TERM -x Hushhh || true

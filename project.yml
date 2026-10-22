@@ -58,3 +58,34 @@ targets:
         OTHER_LDFLAGS: -lparakeet_bundle -lc++
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
+  HushhhTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: HushhhTests
+      - path: Hushhh/Core/Placement
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(HUSHHH_BUNDLE_PREFIX).hushhh.tests
+        ENABLE_HARDENED_RUNTIME: NO
+
+schemes:
+  Hushhh:
+    build:
+      targets:
+        Hushhh: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release
+  HushhhTests:
+    build:
+      targets:
+        HushhhTests: [test]
+    test:
+      config: Debug
+      targets:
+        - HushhhTests

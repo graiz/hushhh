@@ -362,12 +362,6 @@ struct FocusContext {
         return rect.minX
     }
 
-    /// Chromium browsers.
-    static let chromiumBundleIDs: Set<String> = [
-        "com.google.Chrome", "com.google.Chrome.canary", "com.microsoft.edgemac", "com.brave.Browser",
-        "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera",
-    ]
-
     /// Electron and Chromium apps only build their accessibility tree when an
     /// assistive app asks for it. Call this when an app becomes active so the
     /// tree is ready by the time the person starts dictating.
@@ -382,7 +376,8 @@ struct FocusContext {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        if let bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier, chromiumBundleIDs.contains(bundle) {
+        let running = NSRunningApplication(processIdentifier: pid)
+        if AppKind.of(bundleURL: running?.bundleURL, bundleID: running?.bundleIdentifier) == .chromium {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }
         return true
