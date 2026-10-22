@@ -28,6 +28,8 @@ struct FocusContext {
         case accessibility
         /// A web editor's own caret element, e.g. Google Docs' `kix-cursor-caret`.
         case pageCaret
+        /// WebKit's and Chromium's text markers (rich web editors).
+        case textMarker
         /// Hushhh laid out the field's text itself (apps that report no positions).
         case estimated
         case none
@@ -79,7 +81,9 @@ struct FocusContext {
     /// - Parameter pid: inspect this app instead of the frontmost one (diagnostics).
     /// - Parameter typedTail: the last word Hushhh typed this session (helps terminals).
     /// - Parameter forceInline: place ghost text even mid-line (alignment tests).
-    static func capture(pid: pid_t? = nil, typedTail: String? = nil, forceInline: Bool = false) -> FocusContext {
+    /// - Parameter preferTextMarkers: skip index lookups and use text markers (alignment tests).
+    static func capture(pid: pid_t? = nil, typedTail: String? = nil, forceInline: Bool = false,
+                        preferTextMarkers: Bool = false) -> FocusContext {
         let targetPID = pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
         let root: AXUIElement
         var justEnabled = false
@@ -117,6 +121,7 @@ struct FocusContext {
         var settable: DarwinBoolean = false
         AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
         var isEditable = textRoles.contains(role) || (range != nil && settable.boolValue)
+        let isWeb = isWebContent(element)
 
         var preceding: Character?
         var following: Character?
@@ -145,13 +150,31 @@ struct FocusContext {
         if let c = preceding, c.isZeroWidth { preceding = nil }
         if let c = following, c.isZeroWidth { following = nil }
 
-        var caret = range.flatMap { caretRect(element, range: $0, precedingIsNewline: preceding?.isNewline == true) }
+        var caret = preferTextMarkers ? nil : range.flatMap { caretRect(element, range: $0, precedingIsNewline: preceding?.isNewline == true) }
         let frame = elementFrame(element)
         var source: CaretSource = caret != nil ? .accessibility : .none
         var fallbackInline: InlineStyle?
 
+        // Rich web editors that answer index lookups with nothing: ask with text markers.
+        if caret == nil, isWeb, let found = TextMarkerCaret.locate(element) {
+            let markerCaret = toCocoa(found.caret)
+            caret = markerCaret
+            source = .textMarker
+            if preceding == nil, let c = found.preceding, !c.isZeroWidth { preceding = c }
+            if following == nil, let c = found.following, !c.isZeroWidth { following = c }
+            // A caret inside an editable region means the page takes typing here.
+            if copyElement(element, "AXEditableAncestor") != nil { isEditable = true }
+            let style = textStyle(from: found.attributes, pid: targetPID)
+            let rightEdge = frame.map { max(markerCaret.maxX + 120, $0.maxX) } ?? markerCaret.minX + 480
+            var built = InlineStyle(caret: markerCaret, font: style.font, color: style.color,
+                                    lineStartX: min(found.lineStartX ?? markerCaret.minX, markerCaret.minX),
+                                    rightEdgeX: rightEdge, singleLine: role == kAXTextFieldRole)
+            built.replacing = found.selection.map(toCocoa)
+            fallbackInline = built
+        }
+
         // Web editors that draw text themselves (Google Docs) keep a caret element in the page.
-        if caret == nil, isWebContent(element), let found = pageCaret(app: root) {
+        if caret == nil, isWeb, let found = pageCaret(app: root) {
             caret = found.caret
             source = .pageCaret
             // A live caret in a web editor means the page is accepting typing, even
@@ -221,7 +244,7 @@ struct FocusContext {
         // otherwise it would draw over existing words.
         var inline: InlineStyle?
         fallbackInline?.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
-        if source == .pageCaret || source == .estimated {
+        if source == .pageCaret || source == .estimated || source == .textMarker {
             inline = atLineEnd || source == .pageCaret ? fallbackInline : nil
         } else if var caret, let range, atLineEnd {
             let style = textStyle(element, range: range, hasPreceding: preceding != nil, pid: targetPID)
@@ -273,7 +296,7 @@ struct FocusContext {
                                     singleLine: singleLine)
             built.cursorWidth = cursorWidth
             built.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
-            built.alignsToTop = !isTerminal && !isWebContent(element)
+            built.alignsToTop = !isTerminal && !isWeb
             if range.length > 0, let selected = bounds(element, for: range), selected.height > 1, selected.origin != .zero {
                 built.replacing = toCocoa(selected)
             }
@@ -299,7 +322,11 @@ struct FocusContext {
         var value: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(element, kAXAttributedStringForRangeParameterizedAttribute as CFString, param, &value) == .success,
               let attributed = value as? NSAttributedString, attributed.length > 0 else { return (nil, nil) }
-        let attrs = attributed.attributes(at: 0, effectiveRange: nil)
+        return textStyle(from: attributed.attributes(at: 0, effectiveRange: nil), pid: pid)
+    }
+
+    /// Font and colour from the attributes an app reports for a run of text.
+    private static func textStyle(from attrs: [NSAttributedString.Key: Any], pid: pid_t?) -> (font: NSFont?, color: NSColor?) {
         var font: NSFont?
         if let info = attrs[NSAttributedString.Key("AXFont")] as? [String: Any],
            let size = (info["AXFontSize"] as? NSNumber).map({ CGFloat($0.doubleValue) }) {

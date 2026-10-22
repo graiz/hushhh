@@ -524,9 +524,9 @@ final class DictationController: ObservableObject {
             var caret = predicted
             var source = "estimate"
             let method = self.focus?.caretSource ?? .none
-            if method == .pageCaret || method == .estimated {
-                // Re-run the same method: the page's caret element, or our own layout
-                // of the field's updated text.
+            if method == .pageCaret || method == .estimated || method == .textMarker {
+                // Re-run the same method: the page's caret element, text markers, or our
+                // own layout of the field's updated text.
                 let tail = self.typedText.split(separator: " ").last.map(String.init)
                 if let fresh = FocusContext.capture(typedTail: tail).caretRect,
                    Self.isPlausible(fresh, predicted: predicted, from: style) {

@@ -31,10 +31,11 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
 - With **live typing** on (Settings › General), each word is typed into the field once it has stayed the same for the commit delay (3 s by default). Esc and Tab then replace that typed text only in apps that let Hushhh select it and confirm it matches.
 - **Finding the cursor.** Hushhh uses the first method that works for the app, and checks each later position against its own estimate:
   1. Accessibility character positions (most native apps, Chrome, Safari).
-  2. A web editor's own caret element (Google Docs).
-  3. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
-  4. The terminal grid (Ghostty).
-  5. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
+  2. Text markers, WebKit's and Chromium's position API for rich web editors.
+  3. A web editor's own caret element (Google Docs).
+  4. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
+  5. The terminal grid (Ghostty).
+  6. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
 - Ghost text is drawn with TextKit in a non-activating panel, so the app you're typing in keeps focus. When the app doesn't report its font family, Hushhh identifies it from where each character sits. Once the text wraps onto a second line, a backdrop in the page's own colour appears behind it.
 
 ## Developer diagnostics
@@ -47,8 +48,8 @@ HUSHHH_DEV=1 $APP --transcribe speech.wav --engine qvac   # or whisper; add --do
 HUSHHH_DEV=1 $APP --demo-overlay                          # cycles the overlay through its states
 HUSHHH_DEV=1 $APP --polish "some dictated text"           # runs the configured polish provider
 HUSHHH_DEV=1 $APP --probe-focus out.log --bundle <id>     # logs what an app reports (includes the end of its text)
-HUSHHH_DEV=1 $APP --align-test --bundle <id> --phase draw --no-move --ghost "words"
-                                                          # draws red ghost text at that app's cursor (--hero: as users see it)
+HUSHHH_DEV=1 $APP --align-test --bundle <id> [--markers] --phase draw --no-move --ghost "words"
+                                                          # draws red ghost text at that app's cursor (--hero: as users see it; --markers: use text markers, skip index lookups)
 ```
 
 ## Alignment results

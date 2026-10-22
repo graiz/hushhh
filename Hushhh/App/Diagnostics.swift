@@ -226,7 +226,8 @@ enum Diagnostics {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { exit(0) }
     }
 
-    /// `Hushhh --align-test --bundle <id> --split <n> --phase prepare|draw`
+    /// `Hushhh --align-test --bundle <id> --split <n> --phase prepare|draw [--markers]`
+    /// --markers: skip index lookups and use text markers.
     /// prepare: puts the caret at character n of the focused field and prints where
     ///          Hushhh thinks it is (top-left screen points) plus the rest of the line.
     /// draw:    draws that rest of the line as red ghost text where Hushhh would place it,
@@ -266,7 +267,7 @@ enum Diagnostics {
             AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, AXValueCreate(.cfRange, &caretRange)!)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            let context = FocusContext.capture(pid: pid, forceInline: true)
+            let context = FocusContext.capture(pid: pid, forceInline: true, preferTextMarkers: args.contains("--markers"))
             guard let style = context.inline else {
                 print("error: no inline placement (source \(context.caretSource.rawValue), caret \(String(describing: context.caretRect)))")
                 exit(2)
