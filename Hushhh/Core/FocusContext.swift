@@ -256,19 +256,25 @@ struct FocusContext {
                 ? caret.minX
                 : (lineStartX(element, index: range.location - 1) ?? caret.minX)
 
-            // Some apps (Excel cells) report the whole field for every character.
-            // Then find the caret by measuring the line's text in the field's font.
-            if let frame, let value, range.location > 0,
+            // Some apps report a box that can't be one character: the whole field for
+            // every character (Excel cells), or a collapsed one. Then measure the line's
+            // text in the field's font from where the line starts.
+            if !isTerminal, let value, range.location > 0,
                let previous = bounds(element, for: CFRange(location: range.location - 1, length: 1)),
-               previous.width > (style.font?.pointSize ?? 13) * 2.5 {
+               !CaretMath.isPlausibleCharacterBox(previous, fontSize: style.font?.pointSize ?? 13) {
                 let font = style.font ?? NSFont.systemFont(ofSize: 13)
                 let ns = value as NSString
                 let head = ns.substring(to: min(range.location, ns.length))
                 let line = head.components(separatedBy: .newlines).last ?? head
-                let inset: CGFloat = 4   // Excel draws cell text 4 pt in from the cell edge (measured)
-                lineStart = frame.minX + inset
-                let width = (line as NSString).size(withAttributes: [.font: font]).width
-                caret = CGRect(x: min(lineStart + width, frame.maxX), y: caret.minY, width: 1, height: caret.height)
+                if let startBox = lineStartBox(element, index: range.location - 1),
+                   CaretMath.isPlausibleCharacterBox(startBox, fontSize: font.pointSize) {
+                    lineStart = startBox.minX
+                } else if let frame {
+                    lineStart = frame.minX + 4   // Excel draws cell text 4 pt in from the cell edge (measured)
+                }
+                caret = CGRect(x: CaretMath.caretX(lineStartX: lineStart, prefix: line, font: font,
+                                                   limit: frame?.maxX ?? .greatestFiniteMagnitude),
+                               y: caret.minY, width: 1, height: caret.height)
             }
 
             var rightEdge = caret.minX + 480
@@ -377,6 +383,11 @@ struct FocusContext {
 
     /// Screen x of the first character on the line containing `index`.
     private static func lineStartX(_ element: AXUIElement, index: Int) -> CGFloat? {
+        lineStartBox(element, index: index)?.minX
+    }
+
+    /// Box (Accessibility coordinates) of the first character on the line containing `index`.
+    private static func lineStartBox(_ element: AXUIElement, index: Int) -> CGRect? {
         var lineValue: CFTypeRef?
         guard index >= 0,
               AXUIElementCopyParameterizedAttributeValue(element, kAXLineForIndexParameterizedAttribute as CFString,
@@ -390,7 +401,7 @@ struct FocusContext {
         guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &lineRange) else { return nil }
         guard let rect = bounds(element, for: CFRange(location: lineRange.location, length: 1)),
               rect.height > 1, rect.origin != .zero else { return nil }
-        return rect.minX
+        return rect
     }
 
     /// Electron and Chromium apps only build their accessibility tree when an
