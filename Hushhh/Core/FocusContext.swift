@@ -212,12 +212,14 @@ struct FocusContext {
                 source = .hiddenInput
                 isEditable = true
                 let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
-                let font = reported?.font ?? editorFont ?? codeEditorFont(bundleID: bundleID) ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
+                let font = reported?.font ?? editorFont ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
                 let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
                 var built = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
                                         lineStartX: min(lineStart ?? toCocoa(input).minX, inputCaret.minX),
                                         rightEdgeX: inputCaret.minX + 480, singleLine: false)
-                built.background = reported?.background
+                // Match the editor's own theme, since its text colour alone can't say which.
+                let themeColour: NSColor? = editorTheme(from: lineNode ?? element).map { $0 == .dark ? NSColor(white: 0.12, alpha: 1) : .white }
+                built.background = reported?.background ?? themeColour
                 fallbackInline = built
             }
         }
@@ -562,6 +564,8 @@ struct FocusContext {
     /// The status bar item that reads "Ln …, Col …" in a code editor's window. Found once
     /// per dictation session, then re-read directly.
     private static var statusElement: AXUIElement?
+    /// Set once the window has been searched, so one without a status bar isn't searched again.
+    private static var statusSearched = false
 
     /// Moves a code editor's hidden-input caret right by its column's worth of cells.
     /// Returns it unchanged when the font or column isn't available.
@@ -573,10 +577,12 @@ struct FocusContext {
         return moved
     }
 
+    /// Finds the status bar item that reads "Ln …, Col …", once per session, then re-reads it.
     private static func codeEditorColumn(app: AXUIElement) -> Int? {
         if let cached = statusElement, let text: String = copyValue(cached, kAXDescriptionAttribute),
            let found = CodeEditorPosition.lineAndColumn(fromStatus: text) { return found.column }
-        guard let window = copyElement(app, kAXFocusedWindowAttribute) else { return nil }
+        guard !statusSearched, let window = copyElement(app, kAXFocusedWindowAttribute) else { return nil }
+        statusSearched = true
         let deadline = Date().addingTimeInterval(0.08)
         var queue = [window]
         var visited = 0
@@ -609,6 +615,7 @@ struct FocusContext {
         ghosttyCache = nil
         fontCache = nil
         statusElement = nil
+        statusSearched = false
     }
 
     private static func codeSettings(bundleID: String?) -> (families: [String], size: CGFloat?) {
@@ -740,9 +747,10 @@ struct FocusContext {
         text.reduce(0) { $0 + ($1.unicodeScalars.first?.properties.isEmojiPresentation == true ? 2 : 1) }
     }
 
-    /// Reads simple `key = value` lines from Ghostty's config file.
+    /// Ghostty's config, read once per session.
     private static var ghosttyCache: [String: String]?
 
+    /// Reads simple `key = value` lines from Ghostty's config file.
     private static func ghosttyConfig() -> [String: String] {
         if let cached = ghosttyCache { return cached }
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -919,6 +927,17 @@ struct FocusContext {
 
     /// The code line drawn at a screen point (Accessibility coordinates): the element
     /// there or its nearest ancestor (up to 4 levels) that is a code editor's line; nil if none is.
+    /// The editor's theme, from the nearest ancestor that carries one (Monaco's root).
+    private static func editorTheme(from node: AXUIElement) -> EditorTheme? {
+        var current = node
+        for _ in 0..<12 {
+            if let theme = EditorTheme.theme(fromClasses: copyValue(current, "AXDOMClassList") ?? []) { return theme }
+            guard let parent = copyElement(current, kAXParentAttribute) else { return nil }
+            current = parent
+        }
+        return nil
+    }
+
     private static func lineElement(at point: CGPoint, app: AXUIElement) -> AXUIElement? {
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success, var node = hit else { return nil }

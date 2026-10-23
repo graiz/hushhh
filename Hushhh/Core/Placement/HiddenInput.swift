@@ -28,3 +28,15 @@ enum HiddenInput {
         classes.contains(where: lineClasses.contains)
     }
 }
+
+/// A web code editor's colour theme, from the DOM classes Monaco puts on its root.
+enum EditorTheme {
+    case light, dark
+
+    /// Whole tokens only: `vs` is a prefix of `vs-dark`.
+    static func theme(fromClasses classes: [String]) -> EditorTheme? {
+        if classes.contains(where: { $0 == "vs-dark" || $0 == "hc-black" }) { return .dark }
+        if classes.contains(where: { $0 == "vs" || $0 == "hc-light" }) { return .light }
+        return nil
+    }
+}

@@ -39,4 +39,12 @@ final class HiddenInputTests: XCTestCase {
         XCTAssertFalse(HiddenInput.isLineClass(["view-lines"]))
         XCTAssertFalse(HiddenInput.isLineClass([]))
     }
+    func testThemeFromClasses() {
+        XCTAssertEqual(EditorTheme.theme(fromClasses: ["monaco-editor", "vs-dark"]), .dark)
+        XCTAssertEqual(EditorTheme.theme(fromClasses: ["hc-black"]), .dark)
+        XCTAssertEqual(EditorTheme.theme(fromClasses: ["monaco-editor", "vs"]), .light)
+        XCTAssertEqual(EditorTheme.theme(fromClasses: ["hc-light"]), .light)
+        XCTAssertNil(EditorTheme.theme(fromClasses: ["monaco-editor", "vsx"]))
+        XCTAssertNil(EditorTheme.theme(fromClasses: []))
+    }
 }
