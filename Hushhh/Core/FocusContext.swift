@@ -30,6 +30,8 @@ struct FocusContext {
         case pageCaret
         /// WebKit's and Chromium's text markers (rich web editors).
         case textMarker
+        /// A web code editor's hidden input, which it moves to the caret (VS Code, CodeMirror).
+        case hiddenInput
         /// Hushhh laid out the field's text itself (apps that report no positions).
         case estimated
         case none
@@ -198,6 +200,32 @@ struct FocusContext {
                                          singleLine: false)
         }
 
+        // Web code editors (VS Code, CodeMirror, Ace) type into a tiny textarea parked at
+        // the caret. Wait until the editor has moved it, then read the line drawn there.
+        if caret == nil, isWeb, var input = axFrame(element), HiddenInput.isHidden(input) {
+            for _ in 0..<2 {
+                usleep(40_000)
+                guard let again = axFrame(element) else { break }
+                if HiddenInput.isSettled(input, again) { break }
+                input = again
+            }
+            // Just right of the 1 pt input, so the hit test finds the text, not the input.
+            let lineNode = lineElement(at: CGPoint(x: input.minX + 3, y: input.midY), app: root)
+            let line = lineNode.flatMap(axFrame)
+            if let found = HiddenInput.caret(input: input, line: line), isUsable(toCocoa(found).insetBy(dx: -10, dy: 0)) {
+                let inputCaret = toCocoa(found)
+                caret = inputCaret
+                source = .hiddenInput
+                isEditable = true
+                let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
+                let font = reported?.font ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
+                let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
+                fallbackInline = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
+                                             lineStartX: min(lineStart ?? inputCaret.minX, inputCaret.minX),
+                                             rightEdgeX: inputCaret.minX + 480, singleLine: false)
+            }
+        }
+
         let bundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
         let isTerminal = bundleID.map(terminalBundleIDs.contains) ?? false
 
@@ -248,7 +276,7 @@ struct FocusContext {
         // otherwise it would draw over existing words.
         var inline: InlineStyle?
         fallbackInline?.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
-        if source == .pageCaret || source == .estimated || source == .textMarker {
+        if source == .pageCaret || source == .estimated || source == .textMarker || source == .hiddenInput {
             inline = atLineEnd || source == .pageCaret ? fallbackInline : nil
         } else if var caret, let range, atLineEnd {
             let style = textStyle(element, range: range, hasPreceding: preceding != nil, pid: targetPID)
@@ -785,6 +813,26 @@ struct FocusContext {
             return toCocoa(CGRect(x: previous.maxX, y: previous.minY, width: 1, height: previous.height))
         }
         return zero.map(toCocoa)
+    }
+
+    /// Frame in Accessibility coordinates (top-left origin).
+    private static func axFrame(_ element: AXUIElement) -> CGRect? {
+        guard let value = axValue(element, "AXFrame") else { return nil }
+        var rect = CGRect.zero
+        return AXValueGetValue(value, .cgRect, &rect) ? rect : nil
+    }
+
+    /// The code line drawn at a screen point (Accessibility coordinates): the element
+    /// there, or the nearest ancestor that is a code editor's line.
+    private static func lineElement(at point: CGPoint, app: AXUIElement) -> AXUIElement? {
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success, var node = hit else { return nil }
+        for _ in 0..<4 {
+            if HiddenInput.isLineClass(copyValue(node, "AXDOMClassList") ?? []) { return node }
+            guard let parent = copyElement(node, kAXParentAttribute) else { break }
+            node = parent
+        }
+        return hit
     }
 
     private static func elementFrame(_ element: AXUIElement) -> CGRect? {

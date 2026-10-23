@@ -32,10 +32,11 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
 - **Finding the cursor.** Hushhh uses the first method that works for the app, and checks each later position against its own estimate:
   1. Accessibility character positions (most native apps, Chrome, Safari).
   2. Text markers, WebKit's and Chromium's position API for rich web editors.
-  3. A web editor's own caret element (Google Docs).
-  4. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
-  5. The terminal grid (Ghostty).
-  6. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
+  3. A web code editor's hidden input, which it moves to the caret (VS Code, CodeMirror, Ace).
+  4. A web editor's own caret element (Google Docs).
+  5. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
+  6. The terminal grid (Ghostty).
+  7. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
 - Ghost text is drawn with TextKit in a non-activating panel, so the app you're typing in keeps focus. When the app doesn't report its font family, Hushhh identifies it from where each character sits. Once the text wraps onto a second line, a backdrop in the page's own colour appears behind it.
 
 ## Developer diagnostics
