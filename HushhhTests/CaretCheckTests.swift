@@ -22,8 +22,13 @@ final class CaretCheckTests: XCTestCase {
     }
 
     func testSlackAroundFieldEdge() {
-        // Field spans y 300...338; caret 18 tall.
-        XCTAssertTrue(CaretCheck.isPlausible(CGRect(x: 471, y: 297, width: 1, height: 18), in: field))
-        XCTAssertFalse(CaretCheck.isPlausible(CGRect(x: 471, y: 290, width: 1, height: 18), in: field))
+        // Field spans y 300...338; the caret's midpoint may sit 4 pt outside.
+        XCTAssertTrue(CaretCheck.isPlausible(CGRect(x: 471, y: 288, width: 1, height: 18), in: field))
+        XCTAssertFalse(CaretCheck.isPlausible(CGRect(x: 471, y: 281, width: 1, height: 18), in: field))
+    }
+
+    func testTallCaretCenteredOnTightFieldIsPlausible() {
+        let tight = CGRect(x: 459, y: 300, width: 400, height: 18)
+        XCTAssertTrue(CaretCheck.isPlausible(CGRect(x: 471, y: 295, width: 1, height: 28), in: tight))
     }
 }

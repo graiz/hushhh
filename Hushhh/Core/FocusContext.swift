@@ -159,7 +159,7 @@ struct FocusContext {
         // but only in editable content, since a page's own selection is not a typing caret.
         if caret == nil, isWeb, isEditable || copyElement(element, "AXEditableAncestor") != nil,
            let found = TextMarkerCaret.locate(element),
-           // Some editors report a box far taller than a line for an empty line.
+           // Some editors report a box far taller than a line near the caret.
            CaretCheck.isPlausible(toCocoa(found.caret), in: frame.flatMap { isUsable($0) ? $0 : nil }) {
             let markerCaret = toCocoa(found.caret)
             caret = markerCaret
