@@ -13,15 +13,32 @@ enum AppOverridesStore {
         AppOverrides.resolve(bundleID: bundleID, host: host, builtIn: AppOverrides.builtIn, user: user())
     }
 
+    private static var cachedHasSiteEntries: Bool?
+
+    /// Whether any entry is for a site, so capture only looks up the page's address
+    /// when one could apply. Kept for the session, like the table.
+    static var hasSiteEntries: Bool {
+        if let cachedHasSiteEntries { return cachedHasSiteEntries }
+        let found = AppOverrides.hasSiteEntries(AppOverrides.builtIn, user())
+        cachedHasSiteEntries = found
+        return found
+    }
+
     /// Forget the file's contents; the next lookup reads it again.
-    static func beginSession() { cached = nil }
+    static func beginSession() {
+        cached = nil
+        cachedHasSiteEntries = nil
+    }
 
     private static func user() -> [String: AppOverride] {
         if let cached { return cached }
         var table: [String: AppOverride] = [:]
         if let data = try? Data(contentsOf: url) {
-            table = AppOverrides.decode(data) ?? [:]
-            if table.isEmpty { FocusLog.write("overrides: couldn't read \(url.lastPathComponent), or it's empty") }
+            if let decoded = AppOverrides.decode(data) {
+                table = decoded
+            } else {
+                FocusLog.write("overrides: couldn't read \(url.lastPathComponent); ignoring it")
+            }
         }
         cached = table
         return table

@@ -35,14 +35,10 @@ enum Diagnostics {
 
             guard let samples = loadSamples(file) else { print("Couldn’t read \(file)"); exit(1) }
             let live = LiveTranscriber(engineProvider: { engine })
-            var tracker = CommitTracker(delay: 3)
-            var typed: [String] = []
             let began = Date()
             live.onPartial = { text in
-                let (settled, pending) = tracker.update(text)
-                typed += settled
                 let t = String(format: "%5.1fs", Date().timeIntervalSince(began))
-                print("\(t)  typed: \(typed.joined(separator: " "))  ‹ghost: \(pending.joined(separator: " "))›")
+                print("\(t)  partial: \(text)")
             }
             live.start()
             // Feed the audio in real time, 100 ms at a time, like the microphone does.
@@ -58,7 +54,6 @@ enum Diagnostics {
             let t = Date()
             let text = await live.finish()
             print(String(format: "final (%.2fs after end of audio): %@", Date().timeIntervalSince(t), text))
-            print("document: \((typed + tracker.remainder(of: text)).joined(separator: " "))")
             exit(0)
         }
     }

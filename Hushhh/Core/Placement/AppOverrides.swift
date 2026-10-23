@@ -33,6 +33,7 @@ struct AppOverride: Codable, Equatable {
         rect.offsetBy(dx: CGFloat(horizontalOffset ?? 0), dy: CGFloat(verticalOffset ?? 0))
     }
 
+    /// `font` scaled by `fontScale`; a missing or non-positive scale leaves it as it is.
     func adjust(font: NSFont?) -> NSFont? {
         guard let font, let scale = fontScale, scale > 0 else { return font }
         return NSFont(descriptor: font.fontDescriptor, size: font.pointSize * CGFloat(scale))
@@ -51,10 +52,26 @@ enum AppOverrides {
     static func resolve(bundleID: String?, host: String?, builtIn: [String: AppOverride], user: [String: AppOverride]) -> AppOverride {
         func site(_ table: [String: AppOverride]) -> AppOverride? {
             guard let host else { return nil }
-            return table.first { key, _ in key.hasPrefix("domain:") && hostMatches(String(key.dropFirst(7)), host) }?.value
+            let matches = table.keys.filter { $0.hasPrefix(sitePrefix) && hostMatches(String($0.dropFirst(sitePrefix.count)), host) }
+            return matches.max { specificity($0) < specificity($1) }.flatMap { table[$0] }
         }
         let layers = [bundleID.flatMap { builtIn[$0] }, bundleID.flatMap { user[$0] }, site(builtIn), site(user)]
         return layers.compactMap { $0 }.reduce(AppOverride()) { $0.merged(with: $1) }
+    }
+
+    static let sitePrefix = "domain:"
+
+    /// True when either table has a site entry, so pages are only asked for their
+    /// address when an entry could use it.
+    static func hasSiteEntries(_ tables: [String: AppOverride]...) -> Bool {
+        tables.contains { $0.keys.contains { $0.hasPrefix(sitePrefix) } }
+    }
+
+    /// Ranks matching site keys so the most specific wins: an exact host beats any
+    /// wildcard, and a longer wildcard apex beats a shorter one.
+    private static func specificity(_ key: String) -> Int {
+        let pattern = key.dropFirst(sitePrefix.count)
+        return pattern.hasPrefix("*.") ? pattern.count - 2 : Int.max
     }
 
     static func hostMatches(_ pattern: String, _ host: String) -> Bool {

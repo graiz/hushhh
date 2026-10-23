@@ -18,8 +18,6 @@ struct FocusContext {
     var isSecure = false
     /// Selection when the context was captured.
     var selection: CFRange? = nil
-    /// Font reported next to the caret, used to estimate layout in bubble mode too.
-    var font: NSFont? = nil
     /// How the caret was found.
     var caretSource: CaretSource = .none
 
@@ -106,9 +104,10 @@ struct FocusContext {
         AXUIElementSetMessagingTimeout(root, 0.25)
 
         var focused: AXUIElement? = copyElement(root, kAXFocusedUIElementAttribute)
-        if focused == nil, justEnabled || targetPID.map({ appKind(pid: $0) == .electron }) == true {
+        if focused == nil, let targetPID,
+           justEnabled || (appKind(pid: targetPID) == .electron && waitedForTree.insert(targetPID).inserted) {
             // Chromium and Electron build their accessibility tree just after being asked;
-            // give it one moment.
+            // give it one moment. Electron keeps its tree once built, so wait once per app.
             usleep(150_000)
             focused = copyElement(root, kAXFocusedUIElementAttribute)
         }
@@ -163,6 +162,8 @@ struct FocusContext {
         let frame = elementFrame(element)
         var source: CaretSource = caret != nil ? .accessibility : .none
         var fallbackInline: InlineStyle?
+        // Set when a code editor's column put the caret exactly where its text ends.
+        var columnKnown = false
 
         // Rich web editors that answer index lookups with nothing: ask with text markers,
         // but only in editable content, since a page's own selection is not a typing caret.
@@ -189,8 +190,12 @@ struct FocusContext {
             fallbackInline = built
         }
 
+        let bundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
+        let isCodeEditor = bundleID.map(AppKind.codeEditorBundleIDs.contains) ?? false
+
         // Web editors that draw text themselves (Google Docs) keep a caret element in the page.
-        if caret == nil, isWeb, let found = pageCaret(app: root) {
+        // Code editors' cursors aren't in the Accessibility tree, so don't search for one there.
+        if caret == nil, isWeb, !isCodeEditor, let found = pageCaret(app: root) {
             caret = found.caret
             source = .pageCaret
             // A live caret in a web editor means the page is accepting typing, even
@@ -210,24 +215,23 @@ struct FocusContext {
                                          singleLine: false)
         }
 
-        let bundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
-
         // Web code editors (VS Code, CodeMirror, Ace) type into a tiny textarea parked at
         // the caret. Read the line drawn there.
         if caret == nil, isWeb, let input = axFrame(element), HiddenInput.isHidden(input) {
             // Just right of the input (0–1 pt wide), so the hit test finds the text, not the input.
             let lineNode = lineElement(at: CGPoint(x: input.minX + 3, y: input.midY), app: root)
             let line = lineNode.flatMap(axFrame)
-            let editorFont = bundleID.flatMap { AppKind.codeEditorBundleIDs.contains($0) ? codeEditorFont(bundleID: $0) : nil }
+            let editorFont = isCodeEditor ? codeEditorFont(bundleID: bundleID) : nil
             if let base = HiddenInput.caret(input: input, line: line),
                case let found = codeEditorCaret(base, input: input, font: editorFont, app: root),
-               isUsable(toCocoa(found).insetBy(dx: -10, dy: 0)) {
-                let inputCaret = toCocoa(found)
+               case let inputCaret = toCocoa(found.caret),
+               NSScreen.screens.contains(where: { $0.frame.contains(CGPoint(x: inputCaret.minX, y: inputCaret.midY)) }) {
+                columnKnown = found.columnApplied
                 caret = inputCaret
                 source = .hiddenInput
                 isEditable = true
                 let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
-                let font = reported?.font ?? editorFont ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
+                let font = reported?.font ?? editorFont ?? NSFont.systemFont(ofSize: min(28, max(11, inputCaret.height / 1.35)))
                 let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
                 var built = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
                                         lineStartX: min(lineStart ?? toCocoa(input).minX, inputCaret.minX),
@@ -240,7 +244,7 @@ struct FocusContext {
         }
 
         let isTerminal = bundleID.map(terminalBundleIDs.contains) ?? false
-        let adjust = AppOverridesStore.current(bundleID: bundleID, host: isWeb ? webURL(element)?.host : nil)
+        let adjust = AppOverridesStore.current(bundleID: bundleID, host: isWeb && AppOverridesStore.hasSiteEntries ? webURL(element)?.host : nil)
 
         // Terminals that report their screen text but no positions (Ghostty): find
         // the cursor on the character grid. The cursor is at the end of the prompt.
@@ -263,10 +267,10 @@ struct FocusContext {
             let reported = textStyle(element, range: range, hasPreceding: preceding != nil, pid: targetPID)
             let font = reported.font ?? NSFont.systemFont(ofSize: 14)
             // Where the field's text starts inside its frame. Chromium's address bar draws
-            // it 7 pt in (measured); web editors start at the edge.
+            // it 7 pt in (measured); web editors start at the edge. An override's textInset wins.
             let description: String = copyValue(element, kAXDescriptionAttribute) ?? ""
             let addressBar = role == kAXTextFieldRole && description.localizedCaseInsensitiveContains("address")
-            let inset: CGFloat = addressBar ? 7 : 0
+            let inset = CGFloat(adjust.textInset ?? (addressBar ? 7 : 0))
             let textFrame = CGRect(x: frame.minX + inset, y: frame.minY, width: frame.width - 2 * inset, height: frame.height)
             if let estimate = estimateCaret(in: textFrame, text: value ?? "", upTo: range.location, font: font) {
                 caret = estimate
@@ -292,8 +296,11 @@ struct FocusContext {
         var inline: InlineStyle?
         fallbackInline?.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
         if source == .pageCaret || source == .estimated || source == .textMarker || source == .hiddenInput {
-            // A hidden input's value is empty, so we can't tell if code follows the caret: no inline text over it.
-            inline = (source == .hiddenInput ? forceInline : (atLineEnd || source == .pageCaret)) ? fallbackInline : nil
+            // A hidden input's value is empty, so Hushhh can't tell whether code follows the caret.
+            // Once the column is known the ghost text starts at the caret on an opaque backdrop,
+            // so code after it is covered rather than overlapped; otherwise show the bubble.
+            let drawInline = source == .hiddenInput ? (forceInline || columnKnown) : (atLineEnd || source == .pageCaret)
+            inline = drawInline ? fallbackInline : nil
         } else if var caret, let range, atLineEnd {
             let style = textStyle(element, range: range, hasPreceding: preceding != nil, pid: targetPID)
             var lineStart = (preceding == nil || preceding?.isNewline == true)
@@ -303,8 +310,10 @@ struct FocusContext {
             // Some apps report a box that can't be one character: the whole field for
             // every character (Excel cells), or a collapsed one. Then measure the line's
             // text in the field's font from where the line starts.
+            // A preceding tab is skipped: it measures as about zero width, so the
+            // measured caret would land too far left.
             if !isTerminal, let value, range.location > 0,
-               let preceding, !preceding.isNewline,
+               let preceding, !preceding.isNewline, preceding != "\t",
                let previous = bounds(element, for: CFRange(location: range.location - 1, length: 1)),
                !CaretMath.isPlausibleCharacterBox(previous, fontSize: style.font?.pointSize ?? 13) {
                 let font = style.font ?? NSFont.systemFont(ofSize: 13)
@@ -380,7 +389,6 @@ struct FocusContext {
                             precedingCharacter: preceding,
                             inline: inline,
                             selection: range,
-                            font: inline?.font ?? range.flatMap { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID).font },
                             caretSource: source)
     }
 
@@ -461,6 +469,9 @@ struct FocusContext {
               rect.height > 1, rect.origin != .zero else { return nil }
         return rect
     }
+
+    /// Electron apps already given a moment to build their accessibility tree in this run of Hushhh.
+    private static var waitedForTree: Set<pid_t> = []
 
     /// The attributes Hushhh itself switched on, per app, for the current dictation session.
     /// Only these are switched off again; one that was already on belongs to someone else.
@@ -583,28 +594,21 @@ struct FocusContext {
         return (CGRect(x: x, y: top - cellHeight, width: 1, height: cellHeight), font, cellWidth, paddingX, preceding)
     }
 
-    /// The status bar item that reads "Ln …, Col …" in a code editor's window. Found once
-    /// per dictation session, then re-read directly.
-    private static var statusElement: AXUIElement?
-    /// Set once the window has been searched, so one without a status bar isn't searched again.
-    private static var statusSearched = false
-
     /// Moves a code editor's hidden-input caret right by its column's worth of cells.
-    /// Returns it unchanged when the font or column isn't available.
-    private static func codeEditorCaret(_ caret: CGRect, input: CGRect, font: NSFont?, app: AXUIElement) -> CGRect {
-        guard let font, let column = codeEditorColumn(app: app) else { return caret }
+    /// Returns it unchanged, with `columnApplied` false, when the font or column isn't available.
+    private static func codeEditorCaret(_ caret: CGRect, input: CGRect, font: NSFont?, app: AXUIElement)
+        -> (caret: CGRect, columnApplied: Bool) {
+        guard let font, let column = codeEditorColumn(app: app) else { return (caret, false) }
         let cell = ("M" as NSString).size(withAttributes: [.font: font]).width
         var moved = caret
         moved.origin.x = CodeEditorPosition.caretX(lineStartX: input.minX, column: column, cellWidth: cell)
-        return moved
+        return (moved, true)
     }
 
-    /// Finds the status bar item that reads "Ln …, Col …", once per session, then re-reads it.
+    /// Reads the column from the status bar item that reads "Ln …, Col …". Capture runs
+    /// once per dictation session, so one search per capture is all it costs.
     private static func codeEditorColumn(app: AXUIElement) -> Int? {
-        if let cached = statusElement, let text: String = copyValue(cached, kAXDescriptionAttribute),
-           let found = CodeEditorPosition.lineAndColumn(fromStatus: text) { return found.column }
-        guard !statusSearched, let window = copyElement(app, kAXFocusedWindowAttribute) else { return nil }
-        statusSearched = true
+        guard let window = copyElement(app, kAXFocusedWindowAttribute) else { return nil }
         let deadline = Date().addingTimeInterval(0.08)
         var queue = [window]
         var visited = 0
@@ -613,7 +617,6 @@ struct FocusContext {
             visited += 1
             if let text: String = copyValue(node, kAXDescriptionAttribute),
                let found = CodeEditorPosition.lineAndColumn(fromStatus: text) {
-                statusElement = node
                 return found.column
             }
             if let children: [AXUIElement] = copyValue(node, kAXChildrenAttribute) { queue.append(contentsOf: children) }
@@ -623,8 +626,7 @@ struct FocusContext {
 
     /// Fonts apps name in their settings, read the first time a dictation session needs
     /// them and kept until the next session starts (see `beginSession`): VS Code-family
-    /// settings, Terminal's profile font, Ghostty's config, the matched font per field
-    /// and the code editor's status bar item.
+    /// settings, Terminal's profile font and Ghostty's config.
     private static var codeSettingsCache: [String: (families: [String], size: CGFloat?)] = [:]
     /// Terminal's default profile font family; `.some(nil)` once read and absent.
     private static var terminalFamilyCache: String??
@@ -636,9 +638,6 @@ struct FocusContext {
         codeSettingsCache = [:]
         terminalFamilyCache = nil
         ghosttyCache = nil
-        fontCache = nil
-        statusElement = nil
-        statusSearched = false
     }
 
     private static func codeSettings(bundleID: String?) -> (families: [String], size: CGFloat?) {
@@ -678,22 +677,12 @@ struct FocusContext {
     /// just before the caret. Comparing every character boundary (not just the total
     /// width) separates fonts of similar width, e.g. Georgia and Helvetica. Returns nil
     /// (keep the system font) when nothing fits well.
-    /// The last match per field, so the per-character lookups run once per field, not on
-    /// every caret update.
-    private static var fontCache: (key: Int, size: CGFloat, font: NSFont?)?
-
     private static func matchFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat,
                                   preferred: [String]) -> NSFont? {
-        let key = Int(CFHash(element))
-        if let cached = fontCache, cached.key == key, cached.size == size {
-            return cached.font
-        }
         // Up to ~30 lookups: keep each one short so an unresponsive app can't stall us.
         AXUIElementSetMessagingTimeout(element, 0.05)
         defer { AXUIElementSetMessagingTimeout(element, 0.25) }
-        let font = measureFont(element, before: location, size: size, lineHeight: lineHeight, preferred: preferred)
-        fontCache = (key, size, font)
-        return font
+        return measureFont(element, before: location, size: size, lineHeight: lineHeight, preferred: preferred)
     }
 
     private static func measureFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat,

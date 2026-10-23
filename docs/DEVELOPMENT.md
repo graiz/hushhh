@@ -7,6 +7,8 @@ Requirements: Apple silicon, macOS 14+, Xcode 26, and `brew install cmake xcodeg
 ```bash
 xcodegen generate
 open Hushhh.xcodeproj        # ⌘R
+make test                    # unit tests (HushhhTests)
+make debug                   # Debug app for the developer diagnostics below
 ```
 
 The first build fetches the QVAC engine at a pinned commit into `Vendor/qvac-transcribepsy` and compiles it into `Vendor/build-qvac/libparakeet_bundle.a`. This takes about a minute and is skipped afterwards; `FORCE=1 scripts/build-qvac.sh` rebuilds it. On first launch, onboarding asks for permissions and downloads a model into `~/Library/Application Support/Hushhh/Models`.
@@ -33,9 +35,9 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
   1. Accessibility character positions (most native apps, Chrome, Safari).
   2. Text markers, WebKit's and Chromium's position API for rich web editors.
   3. A web editor's own caret element (Google Docs).
-  4. A web code editor's hidden input, which it moves to the caret (VS Code, CodeMirror, Ace). For VS Code the column comes from the status bar, so VS Code is never switched into screen-reader mode.
-  5. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
-  6. The terminal grid (Ghostty).
+  4. A web code editor's hidden input, which it moves to the caret (VS Code, CodeMirror, Ace). For VS Code-family editors the column comes from the status bar, so they are never switched into screen-reader mode, and ghost text is drawn inline at that column. Other hidden-input editors show the bubble, since Hushhh can't tell where on the line their caret is.
+  5. The terminal grid (Ghostty).
+  6. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
   7. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
 - Ghost text is drawn with TextKit in a non-activating panel, so the app you're typing in keeps focus. When the app doesn't report its font family, Hushhh identifies it from where each character sits. The ghost text always sits on a backdrop in the field's own background colour (inferred from the text colour when the app doesn't report it), so it stays readable over whatever is below.
 
@@ -55,7 +57,7 @@ HUSHHH_DEV=1 $APP --align-test --bundle <id> [--markers] --phase draw --no-move 
 
 ## Placement overrides
 
-Some apps report their text slightly off. A few numbers can fix that. Settings > Troubleshooting > Edit Placement Overrides opens `~/Library/Application Support/Hushhh/app-overrides.json`, which is read once per dictation session, so edits apply to the next dictation.
+Some apps report their text slightly off. A few numbers can fix that. Settings › Privacy › Troubleshooting › Edit Placement Overrides opens `~/Library/Application Support/Hushhh/app-overrides.json`, which is read once per dictation session, so edits apply to the next dictation.
 
 Keys are a bundle ID (`com.apple.TextEdit`), `domain:docs.example.com` for a site, or `domain:*.example.com` for a site and its subdomains. Every field is optional:
 
@@ -65,9 +67,9 @@ Keys are a bundle ID (`com.apple.TextEdit`), `domain:docs.example.com` for a sit
 - `verticalOffset`: points to move ghost text up (negative: down).
 - `textInset`: points between a field's edge and its text, used where Hushhh measures the text itself (Excel's built-in 4).
 - `greyGhostText`: draw in neutral grey instead of the app's reported text colour.
-- `enhancedUserInterface`: `true` switches AXEnhancedUserInterface on for the session, `false` never does, whatever the app's engine. Hushhh only switches off what it switched on.
+- `enhancedUserInterface`: `true` switches AXEnhancedUserInterface on for the session, `false` never does, whatever the app's engine. Hushhh only switches off what it switched on. This field applies per app only; it has no effect in a `domain:` entry.
 
-Site entries win over app entries, and your entries win over built-in ones, field by field.
+Site entries win over app entries, and your entries win over built-in ones, field by field. When several site entries match, an exact host wins over a wildcard, and the longest wildcard wins among wildcards.
 
 ```json
 {
@@ -101,6 +103,8 @@ Alignment is checked by drawing red ghost text at an app's cursor, typing the sa
 ```
 Hushhh/App        app entry, preferences, permissions, diagnostics
 Hushhh/Core       dictation controller, hotkey + Caps Lock remap, audio, live transcriber, caret lookup, text insertion, polish
+Hushhh/Core/Placement  pure caret and placement logic (no app types), unit tested
+HushhhTests       unit tests for Hushhh/Core/Placement
 Hushhh/Engines    SpeechEngine protocol, QVAC (Obj-C++ bridge) and Whisper engines, model downloads
 Hushhh/UI         overlay, menu bar, Settings window, onboarding
 Config            build settings; put your signing identity in Config/Local.xcconfig

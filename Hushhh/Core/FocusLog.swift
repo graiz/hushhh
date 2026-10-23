@@ -3,7 +3,7 @@ import AppKit
 /// An opt-in rolling log of what apps report about the caret (positions, field
 /// sizes and font names — never the text itself), at ~/Library/Logs/Hushhh/focus.log,
 /// for diagnosing ghost-text placement in specific apps. Off unless enabled in
-/// Settings › General › Troubleshooting.
+/// Settings › Privacy › Troubleshooting.
 enum FocusLog {
     /// Read on the main thread when a session starts; see `Preferences.diagnosticLog`.
     nonisolated(unsafe) static var isEnabled = false

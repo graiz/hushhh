@@ -220,6 +220,8 @@ final class DictationController: ObservableObject {
         let permissions = Permissions.shared
         permissions.refresh()
 
+        // Before capture, so what capture logs about this session is written.
+        FocusLog.isEnabled = prefs.diagnosticLog
         let context = FocusContext.capture()
         focus = context
         // capture() switched accessibility on. Paths that return before a session begins
@@ -230,10 +232,9 @@ final class DictationController: ObservableObject {
             overlay.flash(symbol: "lock.fill", text: "Hushhh doesn’t dictate into password fields", duration: 2)
             return
         }
-        FocusLog.isEnabled = prefs.diagnosticLog
         sessionInline = context.inline
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
-        FocusLog.write("start app=\(app) editable=\(context.isEditable) caret=\(FocusLog.describe(context.caretRect)) frame=\(FocusLog.describe(context.elementFrame)) inline=\(context.inline != nil) source=\(context.caretSource.rawValue) sel=\(context.selection.map { "\($0.location),\($0.length)" } ?? "nil") font=\(context.font?.fontName ?? "nil")")
+        FocusLog.write("start app=\(app) editable=\(context.isEditable) caret=\(FocusLog.describe(context.caretRect)) frame=\(FocusLog.describe(context.elementFrame)) inline=\(context.inline != nil) source=\(context.caretSource.rawValue) sel=\(context.selection.map { "\($0.location),\($0.length)" } ?? "nil") font=\(context.inline?.font?.fontName ?? "nil")")
         let anchor: OverlayController.Anchor = if let inline = context.inline {
             .inline(inline)
         } else if let caret = context.caretRect {

@@ -40,4 +40,32 @@ final class AppOverridesTests: XCTestCase {
     func testExcelInsetIsBuiltIn() {
         XCTAssertEqual(AppOverrides.builtIn["com.microsoft.Excel"]?.textInset, 4)
     }
+    func testExactSiteBeatsWildcard() {
+        let user = ["domain:*.example.com": AppOverride(fontScale: 1.1),
+                    "domain:docs.example.com": AppOverride(fontScale: 1.2)]
+        XCTAssertEqual(AppOverrides.resolve(bundleID: nil, host: "docs.example.com", builtIn: [:], user: user).fontScale, 1.2)
+        XCTAssertEqual(AppOverrides.resolve(bundleID: nil, host: "mail.example.com", builtIn: [:], user: user).fontScale, 1.1)
+    }
+    func testLongestWildcardWins() {
+        let user = ["domain:*.example.com": AppOverride(fontScale: 1.1),
+                    "domain:*.docs.example.com": AppOverride(fontScale: 1.3)]
+        XCTAssertEqual(AppOverrides.resolve(bundleID: nil, host: "a.docs.example.com", builtIn: [:], user: user).fontScale, 1.3)
+        XCTAssertEqual(AppOverrides.resolve(bundleID: nil, host: "b.example.com", builtIn: [:], user: user).fontScale, 1.1)
+    }
+    func testEnhancedUserInterfaceMerges() {
+        let base = AppOverride(enhancedUserInterface: true)
+        XCTAssertEqual(base.merged(with: AppOverride(enhancedUserInterface: false)).enhancedUserInterface, false)
+        XCTAssertEqual(base.merged(with: AppOverride()).enhancedUserInterface, true)
+    }
+    func testNonPositiveFontScaleLeavesFont() {
+        let font = NSFont(name: "Helvetica", size: 12)
+        XCTAssertEqual(AppOverride(fontScale: 0).adjust(font: font)?.pointSize, 12)
+        XCTAssertEqual(AppOverride(fontScale: -1).adjust(font: font)?.pointSize, 12)
+    }
+    func testHasSiteEntries() {
+        XCTAssertFalse(AppOverrides.hasSiteEntries([:], [:]))
+        XCTAssertFalse(AppOverrides.hasSiteEntries(["com.example.app": AppOverride()], [:]))
+        XCTAssertTrue(AppOverrides.hasSiteEntries([:], ["domain:*.example.com": AppOverride()]))
+        XCTAssertTrue(AppOverrides.hasSiteEntries(["domain:docs.example.com": AppOverride()], ["com.example.app": AppOverride()]))
+    }
 }
