@@ -260,21 +260,27 @@ struct FocusContext {
             // every character (Excel cells), or a collapsed one. Then measure the line's
             // text in the field's font from where the line starts.
             if !isTerminal, let value, range.location > 0,
+               let preceding, !preceding.isNewline,
                let previous = bounds(element, for: CFRange(location: range.location - 1, length: 1)),
                !CaretMath.isPlausibleCharacterBox(previous, fontSize: style.font?.pointSize ?? 13) {
                 let font = style.font ?? NSFont.systemFont(ofSize: 13)
                 let ns = value as NSString
                 let head = ns.substring(to: min(range.location, ns.length))
                 let line = head.components(separatedBy: .newlines).last ?? head
+                var measuredStart: CGFloat?
                 if let startBox = lineStartBox(element, index: range.location - 1),
                    CaretMath.isPlausibleCharacterBox(startBox, fontSize: font.pointSize) {
-                    lineStart = startBox.minX
+                    measuredStart = startBox.minX
                 } else if let frame {
-                    lineStart = frame.minX + 4   // Excel draws cell text 4 pt in from the cell edge (measured)
+                    measuredStart = frame.minX + 4   // Excel draws cell text 4 pt in from the cell edge (measured)
                 }
-                caret = CGRect(x: CaretMath.caretX(lineStartX: lineStart, prefix: line, font: font,
-                                                   limit: frame?.maxX ?? .greatestFiniteMagnitude),
-                               y: caret.minY, width: 1, height: caret.height)
+                // Without an established line start the reported caret stands.
+                if let measuredStart {
+                    lineStart = measuredStart
+                    caret = CGRect(x: CaretMath.caretX(lineStartX: lineStart, prefix: line, font: font,
+                                                       limit: frame?.maxX ?? .greatestFiniteMagnitude),
+                                   y: caret.minY, width: 1, height: caret.height)
+                }
             }
 
             var rightEdge = caret.minX + 480
