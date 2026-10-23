@@ -434,22 +434,48 @@ struct FocusContext {
     /// Electron and Chromium apps only build their accessibility tree when an
     /// assistive app asks for it. Call this when an app becomes active so the
     /// tree is ready by the time the person starts dictating.
-    /// Apps already switched on this run; each is only asked once.
-    private static var enabledPIDs: Set<pid_t> = []
+    /// The attributes Hushhh itself switched on, per app, for the current dictation session.
+    /// Only these are switched off again; one that was already on belongs to someone else.
+    private static var switchedOn: [pid_t: [String]] = [:]
 
-    /// Returns true if this call switched the app's accessibility tree on.
+    private static func isOn(_ app: AXUIElement, _ name: String) -> Bool {
+        var value: CFTypeRef?
+        AXUIElementCopyAttributeValue(app, name as CFString, &value)
+        return (value as? Bool) == true
+    }
+
+    /// Returns true if this call switched an attribute on.
     @discardableResult
     static func enableAccessibility(pid: pid_t) -> Bool {
-        guard !enabledPIDs.contains(pid) else { return false }
-        enabledPIDs.insert(pid)
+        guard switchedOn[pid] == nil else { return false }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        var names = ["AXManualAccessibility"]
         let running = NSRunningApplication(processIdentifier: pid)
         if AppKind.of(bundleURL: running?.bundleURL, bundleID: running?.bundleIdentifier) == .chromium {
-            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            names.append("AXEnhancedUserInterface")
         }
-        return true
+        var set: [String] = []
+        for name in names where !isOn(app, name) {
+            // Chromium applies the change yet reports cannotComplete, so check the value too.
+            let result = AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanTrue)
+            if result == .success || isOn(app, name) { set.append(name) }
+        }
+        switchedOn[pid] = set
+        return !set.isEmpty
+    }
+
+    /// Switches off the accessibility attributes Hushhh switched on this session, so apps
+    /// stop paying for an accessibility tree nobody is reading. Attributes that were
+    /// already on (another assistive app's) are left alone: switching them off would
+    /// break that app.
+    static func releaseAccessibility() {
+        for (pid, attributes) in switchedOn {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.25)
+            for name in attributes { AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanFalse) }
+        }
+        switchedOn = [:]
     }
 
     // MARK: AX helpers

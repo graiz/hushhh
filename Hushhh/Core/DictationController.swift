@@ -16,7 +16,16 @@ final class DictationController: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .idle
+    @Published private(set) var state: State = .idle {
+        didSet {
+            guard state == .idle, oldValue != .idle else { return }
+            // Every session ends here. Release on the next turn so the insert or paste that
+            // follows `state = .idle` (it posts its keys synchronously) lands first.
+            DispatchQueue.main.async { [weak self] in
+                if self?.state == .idle { FocusContext.releaseAccessibility() }
+            }
+        }
+    }
     @Published private(set) var engineState: EngineState = .needsModel
 
     private let prefs = Preferences.shared
@@ -210,6 +219,9 @@ final class DictationController: ObservableObject {
 
         let context = FocusContext.capture()
         focus = context
+        // capture() switched accessibility on. Paths that return before a session begins
+        // never reach `state = .idle`, so they release here.
+        defer { if state == .idle { FocusContext.releaseAccessibility() } }
         if context.isSecure {
             overlay.show(anchor: .screen)
             overlay.flash(symbol: "lock.fill", text: "Hushhh doesn’t dictate into password fields", duration: 2)

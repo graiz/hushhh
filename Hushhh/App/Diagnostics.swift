@@ -79,7 +79,7 @@ enum Diagnostics {
             (6.0, { overlay.hide() }),
             (6.5, { overlay.model.phase = .listening; overlay.model.text = "Pill placement when no text field is focused."; overlay.show(anchor: .screen) }),
             (8.0, { overlay.flash(symbol: "doc.on.clipboard", text: "No text field selected — copied to clipboard") }),
-            (10.5, { exit(0) }),
+            (10.5, { FocusContext.releaseAccessibility(); exit(0) }),
         ]
         for (delay, step) in steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: step)
@@ -104,7 +104,7 @@ enum Diagnostics {
             let app = AXUIElementCreateApplication(pid)
             var value: CFTypeRef?
             AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value)
-            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { note("no focused element"); exit(1) }
+            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { note("no focused element"); FocusContext.releaseAccessibility(); exit(1) }
             var element = value as! AXUIElement
             var focusedRole: CFTypeRef?
             AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &focusedRole)
@@ -223,7 +223,7 @@ enum Diagnostics {
                 }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { exit(0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { FocusContext.releaseAccessibility(); exit(0) }
     }
 
     /// `Hushhh --align-test --bundle <id> --split <n> --phase prepare|draw [--markers]`
@@ -247,7 +247,7 @@ enum Diagnostics {
         let root = AXUIElementCreateApplication(pid)
         var focused: CFTypeRef?
         AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &focused)
-        guard let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { print("error: no focused element"); exit(1) }
+        guard let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { print("error: no focused element"); FocusContext.releaseAccessibility(); exit(1) }
         let element = focused as! AXUIElement
         var valueRef: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
@@ -270,7 +270,7 @@ enum Diagnostics {
             let context = FocusContext.capture(pid: pid, forceInline: true, preferTextMarkers: args.contains("--markers"))
             guard let style = context.inline else {
                 print("error: no inline placement (source \(context.caretSource.rawValue), caret \(String(describing: context.caretRect)))")
-                exit(2)
+                FocusContext.releaseAccessibility(); exit(2)
             }
             let primary = NSScreen.screens[0].frame.height
             let c = style.caret
@@ -281,7 +281,7 @@ enum Diagnostics {
             let shown = arg("--ghost").map { TextInserter.applySmartSpacing($0, after: context.precedingCharacter) } ?? rest
             print("rest \(rest.debugDescription)")
             print("display \(shown)")
-            guard phase == "draw" else { exit(0) }
+            guard phase == "draw" else { FocusContext.releaseAccessibility(); exit(0) }
             // --hero: draw exactly what a person sees (grey ghost text, full key hints),
             // for screenshots; otherwise solid red for pixel comparison.
             let hero = args.contains("--hero")
@@ -293,7 +293,7 @@ enum Diagnostics {
             overlay.model.text = shown
             overlay.show(anchor: .inline(style))
             print("drawn")
-            DispatchQueue.main.asyncAfter(deadline: .now() + (hero ? 6 : 2.5)) { exit(0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (hero ? 6 : 2.5)) { FocusContext.releaseAccessibility(); exit(0) }
         }
     }
 
