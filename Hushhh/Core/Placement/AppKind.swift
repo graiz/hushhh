@@ -16,6 +16,14 @@ enum AppKind: Equatable {
         "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "org.chromium.Chromium",
     ]
 
+    /// VS Code and its forks switch into a screen-reader mode, which changes how the
+    /// editor behaves, when an app turns on their accessibility tree. Hushhh leaves it
+    /// off and reads the caret's column from the status bar instead.
+    static let codeEditorBundleIDs: Set<String> = [
+        "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92",
+        "com.exafunction.windsurf", "com.vscodium", "com.google.antigravity",
+    ]
+
     static func classify(bundleID: String?, frameworkNames: [String], hasAppArchive: Bool, infoKeys: Set<String>) -> AppKind {
         // Some Electron apps rename "Electron Framework" after the product; their app
         // archive and its integrity key still give them away.

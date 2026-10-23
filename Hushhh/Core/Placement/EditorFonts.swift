@@ -10,6 +10,7 @@ enum EditorFonts {
         "com.todesktop.230313mzl4w4u92": "Cursor",
         "com.exafunction.windsurf": "Windsurf",
         "com.vscodium": "VSCodium",
+        "com.google.antigravity": "Antigravity",
     ]
     /// VS Code's default editor font list on macOS.
     static let codeDefaultFamilies = ["Menlo", "Monaco", "Courier New"]

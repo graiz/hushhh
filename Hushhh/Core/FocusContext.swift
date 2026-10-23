@@ -195,29 +195,33 @@ struct FocusContext {
                                          singleLine: false)
         }
 
+        let bundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
+
         // Web code editors (VS Code, CodeMirror, Ace) type into a tiny textarea parked at
         // the caret. Read the line drawn there.
         if caret == nil, isWeb, let input = axFrame(element), HiddenInput.isHidden(input) {
             // Just right of the input (0–1 pt wide), so the hit test finds the text, not the input.
             let lineNode = lineElement(at: CGPoint(x: input.minX + 3, y: input.midY), app: root)
             let line = lineNode.flatMap(axFrame)
-            if let found = HiddenInput.caret(input: input, line: line), isUsable(toCocoa(found).insetBy(dx: -10, dy: 0)) {
+            let editorFont = bundleID.flatMap { AppKind.codeEditorBundleIDs.contains($0) ? codeEditorFont(bundleID: $0) : nil }
+            if let base = HiddenInput.caret(input: input, line: line),
+               case let found = codeEditorCaret(base, input: input, font: editorFont, app: root),
+               isUsable(toCocoa(found).insetBy(dx: -10, dy: 0)) {
                 let inputCaret = toCocoa(found)
                 caret = inputCaret
                 source = .hiddenInput
                 isEditable = true
                 let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
-                let font = reported?.font ?? codeEditorFont(bundleID: targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }) ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
+                let font = reported?.font ?? editorFont ?? codeEditorFont(bundleID: bundleID) ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
                 let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
                 var built = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
-                                        lineStartX: min(lineStart ?? inputCaret.minX, inputCaret.minX),
+                                        lineStartX: min(lineStart ?? toCocoa(input).minX, inputCaret.minX),
                                         rightEdgeX: inputCaret.minX + 480, singleLine: false)
                 built.background = reported?.background
                 fallbackInline = built
             }
         }
 
-        let bundleID = targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
         let isTerminal = bundleID.map(terminalBundleIDs.contains) ?? false
 
         // Terminals that report their screen text but no positions (Ghostty): find
@@ -555,9 +559,44 @@ struct FocusContext {
         return (CGRect(x: x, y: top - cellHeight, width: 1, height: cellHeight), font, cellWidth, paddingX, preceding)
     }
 
+    /// The status bar item that reads "Ln …, Col …" in a code editor's window. Found once
+    /// per dictation session, then re-read directly.
+    private static var statusElement: AXUIElement?
+
+    /// Moves a code editor's hidden-input caret right by its column's worth of cells.
+    /// Returns it unchanged when the font or column isn't available.
+    private static func codeEditorCaret(_ caret: CGRect, input: CGRect, font: NSFont?, app: AXUIElement) -> CGRect {
+        guard let font, let column = codeEditorColumn(app: app) else { return caret }
+        let cell = ("M" as NSString).size(withAttributes: [.font: font]).width
+        var moved = caret
+        moved.origin.x = CodeEditorPosition.caretX(lineStartX: input.minX, column: column, cellWidth: cell)
+        return moved
+    }
+
+    private static func codeEditorColumn(app: AXUIElement) -> Int? {
+        if let cached = statusElement, let text: String = copyValue(cached, kAXDescriptionAttribute),
+           let found = CodeEditorPosition.lineAndColumn(fromStatus: text) { return found.column }
+        guard let window = copyElement(app, kAXFocusedWindowAttribute) else { return nil }
+        let deadline = Date().addingTimeInterval(0.08)
+        var queue = [window]
+        var visited = 0
+        while !queue.isEmpty, visited < 1500, Date() < deadline {
+            let node = queue.removeFirst()
+            visited += 1
+            if let text: String = copyValue(node, kAXDescriptionAttribute),
+               let found = CodeEditorPosition.lineAndColumn(fromStatus: text) {
+                statusElement = node
+                return found.column
+            }
+            if let children: [AXUIElement] = copyValue(node, kAXChildrenAttribute) { queue.append(contentsOf: children) }
+        }
+        return nil
+    }
+
     /// Fonts apps name in their settings, read the first time a dictation session needs
-    /// them and kept until the next session starts (see `beginSession`). Never re-read
-    /// on a timer or while typing.
+    /// them and kept until the next session starts (see `beginSession`): VS Code-family
+    /// settings, Terminal's profile font, Ghostty's config, the matched font per field
+    /// and the code editor's status bar item.
     private static var codeSettingsCache: [String: (families: [String], size: CGFloat?)] = [:]
     /// Terminal's default profile font family; `.some(nil)` once read and absent.
     private static var terminalFamilyCache: String??
@@ -567,6 +606,9 @@ struct FocusContext {
     static func beginSession() {
         codeSettingsCache = [:]
         terminalFamilyCache = nil
+        ghosttyCache = nil
+        fontCache = nil
+        statusElement = nil
     }
 
     private static func codeSettings(bundleID: String?) -> (families: [String], size: CGFloat?) {
@@ -608,19 +650,19 @@ struct FocusContext {
     /// (keep the system font) when nothing fits well.
     /// The last match per field, so the per-character lookups run once per field, not on
     /// every caret update.
-    private static var fontCache: (key: Int, size: CGFloat, font: NSFont?, time: Date)?
+    private static var fontCache: (key: Int, size: CGFloat, font: NSFont?)?
 
     private static func matchFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat,
                                   preferred: [String]) -> NSFont? {
         let key = Int(CFHash(element))
-        if let cached = fontCache, cached.key == key, cached.size == size, Date().timeIntervalSince(cached.time) < 120 {
+        if let cached = fontCache, cached.key == key, cached.size == size {
             return cached.font
         }
         // Up to ~30 lookups: keep each one short so an unresponsive app can't stall us.
         AXUIElementSetMessagingTimeout(element, 0.05)
         defer { AXUIElementSetMessagingTimeout(element, 0.25) }
         let font = measureFont(element, before: location, size: size, lineHeight: lineHeight, preferred: preferred)
-        fontCache = (key, size, font, Date())
+        fontCache = (key, size, font)
         return font
     }
 
@@ -699,13 +741,17 @@ struct FocusContext {
     }
 
     /// Reads simple `key = value` lines from Ghostty's config file.
+    private static var ghosttyCache: [String: String]?
+
     private static func ghosttyConfig() -> [String: String] {
+        if let cached = ghosttyCache { return cached }
         let home = FileManager.default.homeDirectoryForCurrentUser
         var result: [String: String] = [:]
         for url in EditorFonts.ghosttyConfigPaths(home: home, xdgConfigHome: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]) {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
             EditorFonts.parseKeyValues(text, into: &result)
         }
+        ghosttyCache = result
         return result
     }
 

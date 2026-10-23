@@ -55,4 +55,10 @@ final class AppKindTests: XCTestCase {
 
         XCTAssertEqual(AppKind.of(bundleURL: nil, bundleID: "com.apple.TextEdit"), .native)
     }
+
+    func testCodeEditorsIncludeVSCodeForks() {
+        XCTAssertTrue(AppKind.codeEditorBundleIDs.contains("com.microsoft.VSCode"))
+        XCTAssertTrue(AppKind.codeEditorBundleIDs.contains("com.todesktop.230313mzl4w4u92"))
+        XCTAssertFalse(AppKind.codeEditorBundleIDs.contains("com.tinyspeck.slackmacgap"))
+    }
 }
