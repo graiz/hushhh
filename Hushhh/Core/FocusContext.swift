@@ -158,7 +158,9 @@ struct FocusContext {
         // Rich web editors that answer index lookups with nothing: ask with text markers,
         // but only in editable content, since a page's own selection is not a typing caret.
         if caret == nil, isWeb, isEditable || copyElement(element, "AXEditableAncestor") != nil,
-           let found = TextMarkerCaret.locate(element) {
+           let found = TextMarkerCaret.locate(element),
+           // Some editors report a box far taller than a line for an empty line.
+           CaretCheck.isPlausible(toCocoa(found.caret), in: frame.flatMap { isUsable($0) ? $0 : nil }) {
             let markerCaret = toCocoa(found.caret)
             caret = markerCaret
             source = .textMarker
