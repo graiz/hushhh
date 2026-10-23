@@ -5,7 +5,7 @@ import CoreGraphics
 /// caret's. All rectangles are in Accessibility coordinates (top-left origin).
 enum HiddenInput {
     /// DOM classes of the element that draws one line of code.
-    static let lineClasses: Set<String> = ["view-line", "CodeMirror-line", "ace_line", "cm-line"]
+    static let lineClasses: Set<String> = ["view-line", "CodeMirror-line", "ace_line"]
 
     /// A focused input this small isn't where text is drawn.
     static func isHidden(_ frame: CGRect) -> Bool {
@@ -22,11 +22,6 @@ enum HiddenInput {
             return CGRect(x: input.minX, y: input.minY, width: 1, height: input.height)
         }
         return nil
-    }
-
-    /// Two readings of the input's frame agree, so the editor has finished moving it.
-    static func isSettled(_ first: CGRect, _ second: CGRect) -> Bool {
-        abs(first.minX - second.minX) < 0.5 && abs(first.minY - second.minY) < 0.5
     }
 
     static func isLineClass(_ classes: [String]) -> Bool {

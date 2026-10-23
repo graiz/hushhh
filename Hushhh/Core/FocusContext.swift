@@ -160,6 +160,8 @@ struct FocusContext {
         // Rich web editors that answer index lookups with nothing: ask with text markers,
         // but only in editable content, since a page's own selection is not a typing caret.
         if caret == nil, isWeb, isEditable || copyElement(element, "AXEditableAncestor") != nil,
+           // Code editors' hidden inputs have their own block below.
+           !(axFrame(element).map(HiddenInput.isHidden) ?? false),
            let found = TextMarkerCaret.locate(element),
            // Some editors report a box far taller than a line near the caret.
            CaretCheck.isPlausible(toCocoa(found.caret), in: frame.flatMap { isUsable($0) ? $0 : nil }) {
@@ -201,15 +203,9 @@ struct FocusContext {
         }
 
         // Web code editors (VS Code, CodeMirror, Ace) type into a tiny textarea parked at
-        // the caret. Wait until the editor has moved it, then read the line drawn there.
-        if caret == nil, isWeb, var input = axFrame(element), HiddenInput.isHidden(input) {
-            for _ in 0..<2 {
-                usleep(40_000)
-                guard let again = axFrame(element) else { break }
-                if HiddenInput.isSettled(input, again) { break }
-                input = again
-            }
-            // Just right of the 1 pt input, so the hit test finds the text, not the input.
+        // the caret. Read the line drawn there.
+        if caret == nil, isWeb, let input = axFrame(element), HiddenInput.isHidden(input) {
+            // Just right of the input (0–1 pt wide), so the hit test finds the text, not the input.
             let lineNode = lineElement(at: CGPoint(x: input.minX + 3, y: input.midY), app: root)
             let line = lineNode.flatMap(axFrame)
             if let found = HiddenInput.caret(input: input, line: line), isUsable(toCocoa(found).insetBy(dx: -10, dy: 0)) {
@@ -277,7 +273,8 @@ struct FocusContext {
         var inline: InlineStyle?
         fallbackInline?.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
         if source == .pageCaret || source == .estimated || source == .textMarker || source == .hiddenInput {
-            inline = atLineEnd || source == .pageCaret ? fallbackInline : nil
+            // A hidden input's value is empty, so we can't tell if code follows the caret: no inline text over it.
+            inline = (source == .hiddenInput ? forceInline : (atLineEnd || source == .pageCaret)) ? fallbackInline : nil
         } else if var caret, let range, atLineEnd {
             let style = textStyle(element, range: range, hasPreceding: preceding != nil, pid: targetPID)
             var lineStart = (preceding == nil || preceding?.isNewline == true)
@@ -823,7 +820,7 @@ struct FocusContext {
     }
 
     /// The code line drawn at a screen point (Accessibility coordinates): the element
-    /// there, or the nearest ancestor that is a code editor's line.
+    /// there or its nearest ancestor (up to 4 levels) that is a code editor's line; nil if none is.
     private static func lineElement(at point: CGPoint, app: AXUIElement) -> AXUIElement? {
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success, var node = hit else { return nil }
@@ -832,7 +829,7 @@ struct FocusContext {
             guard let parent = copyElement(node, kAXParentAttribute) else { break }
             node = parent
         }
-        return hit
+        return nil
     }
 
     private static func elementFrame(_ element: AXUIElement) -> CGRect? {
