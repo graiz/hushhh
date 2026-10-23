@@ -28,7 +28,10 @@ enum TextMarkerCaret {
         let preceding = before.flatMap { string(host, $0) }?.last
         let following = marker(host, "AXNextTextMarkerForTextMarker", end).flatMap { string(host, range(end, $0)) }?.first
 
+        // Some editors (Slack) give no box for a range built from the caret marker, but do
+        // for their own empty selection.
         let zero = bounds(host, range(start, start)).flatMap(usable)
+            ?? (CFEqual(start, end) ? bounds(host, selected).flatMap(usable) : nil)
         var caret: CGRect?
         if let before, preceding?.isNewline != true, let box = bounds(host, before).flatMap(usable) {
             // The collapsed box is the most precise, but only when it sits on the
