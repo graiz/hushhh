@@ -53,6 +53,29 @@ HUSHHH_DEV=1 $APP --align-test --bundle <id> [--markers] --phase draw --no-move 
                                                           # draws red ghost text at that app's cursor (--hero: as users see it; --markers: use text markers, skip index lookups)
 ```
 
+## Placement overrides
+
+Some apps report their text slightly off. A few numbers can fix that. Settings > Troubleshooting > Edit Placement Overrides opens `~/Library/Application Support/Hushhh/app-overrides.json`, which is read once per dictation session, so edits apply to the next dictation.
+
+Keys are a bundle ID (`com.apple.TextEdit`), `domain:docs.example.com` for a site, or `domain:*.example.com` for a site and its subdomains. Every field is optional:
+
+- `inlineDisabled`: never draw ghost text inline; show the bubble instead.
+- `fontScale`: multiplies the ghost text's font size.
+- `horizontalOffset`: points to move ghost text right (negative: left).
+- `verticalOffset`: points to move ghost text up (negative: down).
+- `textInset`: points between a field's edge and its text, used where Hushhh measures the text itself (Excel's built-in 4).
+- `greyGhostText`: draw in neutral grey instead of the app's reported text colour.
+- `enhancedUserInterface`: `true` switches AXEnhancedUserInterface on for the session, `false` never does, whatever the app's engine. Hushhh only switches off what it switched on.
+
+Site entries win over app entries, and your entries win over built-in ones, field by field.
+
+```json
+{
+  "com.apple.TextEdit": { "verticalOffset": -1 },
+  "domain:*.atlassian.net": { "fontScale": 1.05, "greyGhostText": true }
+}
+```
+
 ## Alignment results
 
 Alignment is checked by drawing red ghost text at an app's cursor, typing the same text for real, and comparing screenshots. The offset is in points; 0 means pixel-perfect. These are the author's last results, on macOS 26 with the app versions of October 2026; other versions may differ.

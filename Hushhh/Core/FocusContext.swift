@@ -61,6 +61,21 @@ struct FocusContext {
         var alignsToTop = false
         /// The field's own background colour, when the app reports it.
         var background: NSColor?
+
+        /// This style moved and scaled by a placement override.
+        func adjusted(by override: AppOverride) -> InlineStyle {
+            let dx = CGFloat(override.horizontalOffset ?? 0)
+            let dy = CGFloat(override.verticalOffset ?? 0)
+            var copy = InlineStyle(caret: override.adjust(caret), font: override.adjust(font: font),
+                                   color: override.greyGhostText == true ? nil : color,
+                                   lineStartX: lineStartX + dx, rightEdgeX: rightEdgeX + dx, singleLine: singleLine)
+            copy.cursorWidth = cursorWidth
+            copy.replacing = replacing?.offsetBy(dx: dx, dy: dy)
+            copy.bounds = bounds
+            copy.alignsToTop = alignsToTop
+            copy.background = background
+            return copy
+        }
     }
 
     static let terminalBundleIDs: Set<String> = [
@@ -225,6 +240,7 @@ struct FocusContext {
         }
 
         let isTerminal = bundleID.map(terminalBundleIDs.contains) ?? false
+        let adjust = AppOverridesStore.current(bundleID: bundleID, host: isWeb ? webURL(element)?.host : nil)
 
         // Terminals that report their screen text but no positions (Ghostty): find
         // the cursor on the character grid. The cursor is at the end of the prompt.
@@ -300,7 +316,7 @@ struct FocusContext {
                    CaretMath.isPlausibleCharacterBox(startBox, fontSize: font.pointSize) {
                     measuredStart = startBox.minX
                 } else if let frame {
-                    measuredStart = frame.minX + 4   // Excel draws cell text 4 pt in from the cell edge (measured)
+                    measuredStart = frame.minX + CGFloat(adjust.textInset ?? 0)
                 }
                 // Without an established line start the reported caret stands.
                 if let measuredStart {
@@ -351,6 +367,10 @@ struct FocusContext {
             }
             inline = built
         }
+
+        if adjust.inlineDisabled == true { inline = nil }
+        inline = inline?.adjusted(by: adjust)
+        caret = caret.map(adjust.adjust)
 
         return FocusContext(element: element,
                             appPID: targetPID,
@@ -468,7 +488,9 @@ struct FocusContext {
         guard switchedOn[pid] == nil else { return false }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        let names = appKind(pid: pid) == .chromium ? ["AXEnhancedUserInterface"] : []
+        let running = NSRunningApplication(processIdentifier: pid)
+        let forced = AppOverridesStore.current(bundleID: running?.bundleIdentifier, host: nil).enhancedUserInterface
+        let names = (forced ?? (appKind(pid: pid) == .chromium)) ? ["AXEnhancedUserInterface"] : []
         var set: [String] = []
         for name in names where !isOn(app, name) {
             // Chromium applies the change yet reports cannotComplete, so check the value too.
@@ -610,6 +632,7 @@ struct FocusContext {
     /// Call when a dictation session starts, so app settings changed since the last
     /// session are picked up once, when they're next needed.
     static func beginSession() {
+        AppOverridesStore.beginSession()
         codeSettingsCache = [:]
         terminalFamilyCache = nil
         ghosttyCache = nil
@@ -769,6 +792,18 @@ struct FocusContext {
         frame.width > 20 && frame.height > 8 && NSScreen.screens.contains { $0.frame.intersects(frame) }
     }
 
+    /// The page address of a web element: its own AXURL, else its web area's.
+    private static func webURL(_ element: AXUIElement) -> URL? {
+        var node: AXUIElement? = element
+        for _ in 0..<40 {
+            guard let current = node else { return nil }
+            if let url: URL = copyValue(current, "AXURL") { return url }
+            if (copyValue(current, kAXRoleAttribute) as String?) == "AXWebArea" { return nil }
+            node = copyElement(current, kAXParentAttribute)
+        }
+        return nil
+    }
+
     private static func isWebContent(_ element: AXUIElement) -> Bool {
         var names: CFArray?
         AXUIElementCopyAttributeNames(element, &names)
@@ -925,8 +960,6 @@ struct FocusContext {
         return AXValueGetValue(value, .cgRect, &rect) ? rect : nil
     }
 
-    /// The code line drawn at a screen point (Accessibility coordinates): the element
-    /// there or its nearest ancestor (up to 4 levels) that is a code editor's line; nil if none is.
     /// The editor's theme, from the nearest ancestor that carries one (Monaco's root).
     private static func editorTheme(from node: AXUIElement) -> EditorTheme? {
         var current = node
@@ -938,6 +971,8 @@ struct FocusContext {
         return nil
     }
 
+    /// The code line drawn at a screen point (Accessibility coordinates): the element
+    /// there or its nearest ancestor (up to 4 levels) that is a code editor's line; nil if none is.
     private static func lineElement(at point: CGPoint, app: AXUIElement) -> AXUIElement? {
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success, var node = hit else { return nil }

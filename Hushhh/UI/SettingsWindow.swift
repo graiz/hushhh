@@ -536,10 +536,11 @@ struct PermissionSettings: View {
             }
             Section {
                 Toggle("Write a diagnostic log", isOn: $prefs.diagnosticLog)
+                Button("Edit Placement Overrides…") { NSWorkspace.shared.open(AppOverridesStore.ensureFile()) }
             } header: {
                 Text("Troubleshooting")
             } footer: {
-                SettingsFooter("Logs where apps report the text cursor (never your text) to ~/Library/Logs/Hushhh/focus.log, to help fix ghost-text placement.")
+                SettingsFooter("Logs where apps report the text cursor (never your text) to ~/Library/Logs/Hushhh/focus.log, to help fix ghost-text placement. Placement overrides adjust ghost text for an app or site that reports its text slightly off.")
             }
 
         }

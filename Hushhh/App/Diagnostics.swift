@@ -276,6 +276,7 @@ enum Diagnostics {
             let c = style.caret
             print(String(format: "caret %.1f %.1f %.1f %.1f", c.minX, primary - c.maxY, c.width, c.height))
             print("source \(context.caretSource.rawValue) font \(style.font?.fontName ?? "nil") \(style.font.map { String(format: "%.2f", $0.pointSize) } ?? "")")
+            print("override \(AppOverridesStore.current(bundleID: bundle, host: nil))")
             // --ghost "text": draw this instead of the rest of the line, with the leading
             // space Hushhh would add, and print exactly what to type to compare.
             let shown = arg("--ghost").map { TextInserter.applySmartSpacing($0, after: context.precedingCharacter) } ?? rest
