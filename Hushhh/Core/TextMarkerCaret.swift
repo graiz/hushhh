@@ -24,8 +24,11 @@ enum TextMarkerCaret {
         let end = AXTextMarkerRangeCopyEndMarker(selected)
 
         let previous = marker(host, "AXPreviousTextMarkerForTextMarker", start)
-        let before = previous.map { range($0, start) }
-        let preceding = before.flatMap { string(host, $0) }?.last
+        // An embedded object (U+FFFC: an image, or content outside the field) isn't a
+        // character on the caret's line.
+        let previousText = previous.flatMap { string(host, range($0, start)) }
+        let before = previousText?.last == "\u{FFFC}" ? nil : previous.map { range($0, start) }
+        let preceding = before == nil ? nil : previousText?.last
         let following = marker(host, "AXNextTextMarkerForTextMarker", end).flatMap { string(host, range(end, $0)) }?.first
 
         // Some editors (Slack) give no box for a range built from the caret marker, but do
@@ -33,7 +36,8 @@ enum TextMarkerCaret {
         let zero = bounds(host, range(start, start)).flatMap(usable)
             ?? (CFEqual(start, end) ? bounds(host, selected).flatMap(usable) : nil)
         var caret: CGRect?
-        if let before, preceding?.isNewline != true, let box = bounds(host, before).flatMap(usable) {
+        if let before, preceding?.isNewline != true, let box = bounds(host, before).flatMap(usable),
+           zero.map({ box.height <= $0.height * 1.5 }) ?? true {
             // The collapsed box is the most precise, but only when it sits on the
             // previous character's line.
             if let zero, abs(zero.midY - box.midY) < box.height * 0.5, zero.minX >= box.minX, zero.minX <= box.maxX + 1 {
@@ -46,8 +50,7 @@ enum TextMarkerCaret {
                   let box = bounds(host, range(start, next)).flatMap(usable), box.width > 0,
                   zero.map({ box.height <= $0.height * 1.5 }) ?? true {
             // At the start of a line: the leading edge of the character after the caret.
-            // With an unusable preceding box this is skipped, as the next character may sit on the next line,
-            // and the collapsed box is used instead when the next character's box spans more than a line, as in an empty field.
+            // Skipped when that box spans more than a line (an empty field); the collapsed box is used then.
             caret = CGRect(x: box.minX, y: box.minY, width: 1, height: box.height)
         } else if let zero {
             caret = CGRect(x: zero.minX, y: zero.minY, width: 1, height: zero.height)
