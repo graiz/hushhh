@@ -35,7 +35,7 @@ enum Diagnostics {
 
             guard let samples = loadSamples(file) else { print("Couldn’t read \(file)"); exit(1) }
             let live = LiveTranscriber(engineProvider: { engine })
-            var tracker = CommitTracker(delay: prefs.commitDelay)
+            var tracker = CommitTracker(delay: 3)
             var typed: [String] = []
             let began = Date()
             live.onPartial = { text in

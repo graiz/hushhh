@@ -16,11 +16,11 @@ struct FocusContext {
     let inline: InlineStyle?
     /// A password field: Hushhh never dictates into these.
     var isSecure = false
-    /// Selection when the context was captured; typed text starts at its location.
+    /// Selection when the context was captured.
     var selection: CFRange? = nil
     /// Font reported next to the caret, used to estimate layout in bubble mode too.
     var font: NSFont? = nil
-    /// How the caret was found; later updates in a session use the same method.
+    /// How the caret was found.
     var caretSource: CaretSource = .none
 
     enum CaretSource: String {
@@ -59,16 +59,6 @@ struct FocusContext {
         /// Native text views put extra line spacing below the text, so ghost text aligns
         /// to the top of the caret. Web pages (CSS) and terminals centre it in the line.
         var alignsToTop = false
-
-        func with(caret: CGRect) -> InlineStyle {
-            var copy = InlineStyle(caret: caret, font: font, color: color, lineStartX: lineStartX,
-                                   rightEdgeX: rightEdgeX, singleLine: singleLine)
-            copy.cursorWidth = cursorWidth
-            copy.bounds = self.bounds
-            copy.alignsToTop = alignsToTop
-            // Once typing starts the selection is gone.
-            return copy
-        }
     }
 
     static let terminalBundleIDs: Set<String> = [
@@ -81,10 +71,9 @@ struct FocusContext {
     ]
 
     /// - Parameter pid: inspect this app instead of the frontmost one (diagnostics).
-    /// - Parameter typedTail: the last word Hushhh typed this session (helps terminals).
     /// - Parameter forceInline: place ghost text even mid-line (alignment tests).
     /// - Parameter preferTextMarkers: skip index lookups and use text markers (alignment tests).
-    static func capture(pid: pid_t? = nil, typedTail: String? = nil, forceInline: Bool = false,
+    static func capture(pid: pid_t? = nil, forceInline: Bool = false,
                         preferTextMarkers: Bool = false) -> FocusContext {
         let targetPID = pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
         let root: AXUIElement
@@ -228,7 +217,7 @@ struct FocusContext {
         // Terminals that report their screen text but no positions (Ghostty): find
         // the cursor on the character grid. The cursor is at the end of the prompt.
         if caret == nil, isTerminal, let frame, isUsable(frame), let value, !value.isEmpty,
-           let grid = terminalCaret(element, frame: frame, value: value, bundleID: bundleID, typedTail: typedTail) {
+           let grid = terminalCaret(element, frame: frame, value: value, bundleID: bundleID) {
             caret = grid.caret
             source = .estimated
             preceding = grid.preceding
@@ -461,10 +450,7 @@ struct FocusContext {
     /// Finds a terminal's cursor from its visible screen text. Ghostty reports every
     /// screen row padded with spaces to the terminal's width, which also gives us the
     /// grid size: columns = row length, rows = row count.
-    /// - Parameter typedTail: the last word Hushhh typed this session, if any; the
-    ///   cursor sits right after it.
-    private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?,
-                                      typedTail: String?)
+    private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?)
         -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, padding: CGFloat, preceding: Character?)? {
         let ns = value as NSString
         var start = 0
@@ -514,9 +500,8 @@ struct FocusContext {
             ?? monospacedFont(cellWidth: cellWidth)
 
         // Trailing spaces are padding, except a prompt usually ends with one space
-        // before the cursor. After Hushhh has typed, the cursor follows its last word.
-        let afterOurText = typedTail.map { !$0.isEmpty && content.hasSuffix($0) } ?? false
-        let promptSpace = !afterOurText && line.count > content.count ? 1 : 0
+        // before the cursor.
+        let promptSpace = line.count > content.count ? 1 : 0
         let column = displayWidth(content) + promptSpace
         let row = lines.count - 1
 
@@ -727,16 +712,6 @@ struct FocusContext {
         let lineIndex = (position.y / defaultLine).rounded()
         let top = frame.maxY - lineIndex * lineHeight
         return CGRect(x: frame.minX + position.x, y: top - lineHeight, width: 1, height: lineHeight)
-    }
-
-    /// Screen box (Cocoa coordinates) of a fixed range of text, e.g. the text Hushhh
-    /// typed this session. Steadier than the caret, which some apps report late.
-    static func textBounds(_ element: AXUIElement, location: Int, length: Int) -> (all: CGRect, last: CGRect)? {
-        guard length > 0,
-              let all = bounds(element, for: CFRange(location: location, length: length)), all.height > 1, all.origin != .zero,
-              let last = bounds(element, for: CFRange(location: location + length - 1, length: 1)), last.height > 1, last.origin != .zero
-        else { return nil }
-        return (toCocoa(all), toCocoa(last))
     }
 
     private static func string(_ element: AXUIElement, _ range: CFRange) -> String? {

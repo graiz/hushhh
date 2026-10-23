@@ -69,42 +69,6 @@ enum TextInserter {
         up?.post(tap: .cghidEventTap)
     }
 
-    /// Selects the text Hushhh typed this session (`typed`, starting at `location`) so a
-    /// paste or delete replaces exactly it. Succeeds only if the app lets us set the
-    /// selection and the selected text reads back as what we typed.
-    static func selectTyped(_ typed: String, in element: AXUIElement, at location: Int) -> Bool {
-        var settable: DarwinBoolean = false
-        guard AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return false }
-        let length = (typed as NSString).length
-        var range = CFRange(location: location, length: length)
-        guard let value = AXValueCreate(.cfRange, &range),
-              AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value) == .success else { return false }
-        usleep(30_000)   // let the app apply the selection
-        var selected: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected)
-        func normalized(_ s: String) -> String {
-            s.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{00A0}", with: " ")
-        }
-        guard let text = selected as? String, normalized(text) == normalized(typed) else {
-            // Not what we typed: put the caret back at the end and leave the text alone.
-            var end = CFRange(location: location + length, length: 0)
-            if let back = AXValueCreate(.cfRange, &end) {
-                AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, back)
-            }
-            return false
-        }
-        return true
-    }
-
-    /// Deletes the last `count` characters before the caret (used to undo a cancelled session).
-    static func deleteBackward(_ count: Int) {
-        for _ in 0..<count {
-            postKey(CGKeyCode(kVK_Delete), flags: [])
-            usleep(1_500)
-        }
-    }
-
     // MARK: Type as Unicode key events
 
     static func type(_ text: String) {

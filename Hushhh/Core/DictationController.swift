@@ -31,18 +31,9 @@ final class DictationController: ObservableObject {
     private var recorder: AudioRecorder?
     private var live: LiveTranscriber?
     private var focus: FocusContext?
-    /// Words settle for a few seconds before they're typed into the document.
-    private var tracker = CommitTracker(delay: 3)
-    /// Everything typed into the document this session, so Esc can remove it.
-    private var typedText = ""
-    private var liveTypingActive = false
     /// Inline ghost text placement for this session. The mode is decided once at
     /// the start so the overlay doesn't jump between inline and bubble.
     private var sessionInline: FocusContext.InlineStyle?
-    /// Bubble mode: the caret line the bubble sits under. Only ever moves down.
-    private var bubbleLine: CGRect?
-    /// Layout used to estimate where typed text went when the app's report is unusable.
-    private var estimateStyle: FocusContext.InlineStyle?
     /// Identifies the current microphone start attempt, so a late or timed-out one is ignored.
     private var startToken: UUID?
     /// True while a microphone start is still blocked inside Core Audio.
@@ -226,13 +217,6 @@ final class DictationController: ObservableObject {
         }
         FocusLog.isEnabled = prefs.diagnosticLog
         sessionInline = context.inline
-        bubbleLine = context.inline == nil ? context.caretRect : nil
-        estimateStyle = context.inline ?? context.caretRect.map { caret in
-            let frame = context.elementFrame ?? CGRect(x: caret.minX - 200, y: caret.minY, width: 600, height: caret.height)
-            return FocusContext.InlineStyle(caret: caret, font: context.font, color: nil,
-                                            lineStartX: min(caret.minX, frame.minX + 8),
-                                            rightEdgeX: max(caret.maxX + 40, frame.maxX - 8), singleLine: false)
-        }
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
         FocusLog.write("start app=\(app) editable=\(context.isEditable) caret=\(FocusLog.describe(context.caretRect)) frame=\(FocusLog.describe(context.elementFrame)) inline=\(context.inline != nil) source=\(context.caretSource.rawValue) sel=\(context.selection.map { "\($0.location),\($0.length)" } ?? "nil") font=\(context.font?.fontName ?? "nil")")
         let anchor: OverlayController.Anchor = if let inline = context.inline {
@@ -282,14 +266,8 @@ final class DictationController: ObservableObject {
         live.onPartial = { [weak self] text in
             guard let self, self.state == .listening else { return }
             self.overlay.model.engineLoading = false
-            if self.liveTypingActive {
-                let (settled, pending) = self.tracker.update(text)
-                if !settled.isEmpty { self.typeSettled(settled) }
-                self.overlay.model.text = pending.isEmpty ? "" : self.spaced(pending.joined(separator: " "))
-            } else {
-                // Inline, show the same leading space that inserting will add.
-                self.overlay.model.text = self.sessionInline != nil && !text.isEmpty ? self.spaced(text) : text
-            }
+            // Inline, show the same leading space that inserting will add.
+            self.overlay.model.text = self.sessionInline != nil && !text.isEmpty ? self.spaced(text) : text
             self.overlay.layout()
         }
         live.onError = { [weak self] error in
@@ -306,9 +284,6 @@ final class DictationController: ObservableObject {
             DispatchQueue.main.async { self?.overlay.model.level = level }
         }
 
-        tracker = CommitTracker(delay: prefs.commitDelay)
-        typedText = ""
-        liveTypingActive = prefs.liveTyping && context.isEditable && context.element != nil
         state = .starting
 
         overlay.model.phase = .listening
@@ -418,22 +393,8 @@ final class DictationController: ObservableObject {
                 }
                 let final = self.prefs.smartSpacing
                     ? TextInserter.applySmartSpacing(polished, after: focus.precedingCharacter) : polished
-                // If words were typed live, select exactly that text so the paste replaces
-                // it. Only when the app lets us select and confirm it; never blind backspaces.
-                if !self.typedText.isEmpty {
-                    guard let element = focus.element, let start = focus.selection?.location,
-                          TextInserter.selectTyped(self.typedText, in: element, at: start) else {
-                        TextInserter.copyToClipboard(final)
-                        self.typedText = ""
-                        self.overlay.flash(symbol: "doc.on.clipboard",
-                                           text: "Polished text copied — this app doesn’t let Hushhh replace what it typed",
-                                           duration: 3)
-                        return
-                    }
-                }
                 // Paste, so paragraph breaks don't press Return (which sends in chat apps).
                 TextInserter.insert(final, method: .paste)
-                self.typedText = ""
                 Sound.play(.insert)
             } catch {
                 self.overlay.model.busyLabel = nil
@@ -446,24 +407,6 @@ final class DictationController: ObservableObject {
 
     private func finishSession(with text: String) {
         state = .idle
-        if liveTypingActive {
-            // Type whatever hadn't settled yet; the rest is already in the document.
-            let rest = tracker.remainder(of: text)
-            overlay.hide()
-            if !rest.isEmpty, focusUnchanged() {
-                let chunk = spaced(rest.joined(separator: " "))
-                TextInserter.type(chunk)
-                typedText += chunk
-            } else if !rest.isEmpty {
-                TextInserter.copyToClipboard(text)
-                overlay.flash(symbol: "doc.on.clipboard", text: "You switched apps — copied to clipboard", duration: 2.2)
-            } else if typedText.isEmpty {
-                overlay.flash(symbol: "waveform.slash", text: "No speech detected", duration: 1.2)
-                return
-            }
-            Sound.play(.insert)
-            return
-        }
         guard !text.isEmpty else {
             overlay.flash(symbol: "waveform.slash", text: "No speech detected", duration: 1.2)
             return
@@ -471,6 +414,13 @@ final class DictationController: ObservableObject {
         guard let focus, focus.element != nil, focus.isEditable || focus.caretRect != nil else {
             TextInserter.copyToClipboard(text)
             overlay.flash(symbol: "doc.on.clipboard", text: "No text field selected — copied to clipboard", duration: 2.2)
+            Sound.play(.insert)
+            return
+        }
+        guard focusUnchanged() else {
+            // Never insert into an app the person switched to mid-session.
+            TextInserter.copyToClipboard(text)
+            overlay.flash(symbol: "doc.on.clipboard", text: "You switched apps — copied to clipboard", duration: 2.2)
             Sound.play(.insert)
             return
         }
@@ -486,110 +436,11 @@ final class DictationController: ObservableObject {
         teardownAudio()
         state = .idle
         overlay.hide()
-        // Undo the words that were already typed this session: select them and delete in
-        // one step where the app allows it, otherwise one backspace per character.
-        if !typedText.isEmpty, focusUnchanged() {
-            if let element = focus?.element, let start = focus?.selection?.location,
-               TextInserter.selectTyped(typedText, in: element, at: start) {
-                TextInserter.deleteBackward(1)
-            } else {
-                TextInserter.deleteBackward(typedText.count)
-            }
-        }
-        typedText = ""
         Sound.play(.cancel)
-    }
-
-    // MARK: Live typing
-
-    /// Types newly settled words, then moves the ghost text to the new caret.
-    private func typeSettled(_ words: [String]) {
-        guard focusUnchanged() else {
-            // The person moved to another app; stop typing into it.
-            liveTypingActive = false
-            return
-        }
-        let chunk = spaced(words.joined(separator: " "))
-        TextInserter.type(chunk)
-        typedText += chunk
-
-        // Follow our own text rather than the caret: we know where it starts and how long
-        // it is, and that range doesn't move while the app catches up. Fall back to an
-        // estimate from the field's font when the app's answer doesn't fit.
-        guard let style = estimateStyle else { return }
-        let predicted = Self.advance(style, by: chunk)
-        estimateStyle = style.with(caret: predicted)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self, self.state != .idle else { return }
-            var caret = predicted
-            var source = "estimate"
-            let method = self.focus?.caretSource ?? .none
-            if [.pageCaret, .estimated, .textMarker, .hiddenInput].contains(method) {
-                // Re-run the same method: the page's caret element, text markers, the
-                // editor's moving input, or our own layout of the field's updated text.
-                let tail = self.typedText.split(separator: " ").last.map(String.init)
-                if let fresh = FocusContext.capture(typedTail: tail).caretRect,
-                   Self.isPlausible(fresh, predicted: predicted, from: style) {
-                    caret = fresh
-                    source = method.rawValue
-                }
-            } else if let element = self.focus?.element, let start = self.focus?.selection?.location,
-               let box = FocusContext.textBounds(element, location: start, length: self.typedText.utf16.count) {
-                let reported = CGRect(x: box.last.maxX, y: box.last.minY, width: 1, height: box.last.height)
-                if Self.isPlausible(reported, predicted: predicted, from: style) {
-                    caret = reported
-                    source = "typed-range"
-                }
-            }
-            self.estimateStyle = style.with(caret: caret)
-            FocusLog.write("commit chars=\(self.typedText.utf16.count) predicted=\(FocusLog.describe(predicted)) used=\(source) caret=\(FocusLog.describe(caret))")
-
-            if let inline = self.sessionInline {
-                let updated = inline.with(caret: caret)
-                self.sessionInline = updated
-                self.overlay.move(to: .inline(updated))
-            } else if let line = self.bubbleLine, caret.minY < line.minY - 1 {
-                // The text wrapped onto a new line: move the bubble down below it, never up.
-                let lowered = CGRect(x: line.minX, y: caret.minY, width: line.width, height: line.height)
-                self.bubbleLine = lowered
-                self.overlay.move(to: .caret(lowered))
-            }
-        }
-    }
-
-    /// Where the caret should be after typing `text` at `style.caret`.
-    private static func advance(_ style: FocusContext.InlineStyle, by text: String) -> CGRect {
-        let caret = style.caret
-        let font = style.font ?? NSFont.systemFont(ofSize: min(28, max(11, caret.height / 1.25)))
-        let width = (text as NSString).size(withAttributes: [.font: font]).width
-        var x = caret.minX + width
-        var y = caret.minY
-        let lineWidth = style.rightEdgeX - style.lineStartX
-        if !style.singleLine, lineWidth > 40, x > style.rightEdgeX {
-            // Approximate the wrap onto following lines.
-            let overflow = x - style.rightEdgeX
-            let lines = 1 + Int(overflow / lineWidth)
-            x = style.lineStartX + overflow.truncatingRemainder(dividingBy: lineWidth)
-            y -= CGFloat(lines) * caret.height
-        }
-        return CGRect(x: x, y: y, width: 1, height: caret.height)
-    }
-
-    /// Rejects caret reports that jump backwards, upwards or far from the prediction,
-    /// which some apps (notably Electron editors) send while they update.
-    private static func isPlausible(_ reported: CGRect, predicted: CGRect, from style: FocusContext.InlineStyle) -> Bool {
-        let line = max(style.caret.height, 8)
-        let old = style.caret
-        let sameLineAsPrediction = abs(reported.midY - predicted.midY) < line * 0.6
-            && abs(reported.maxX - predicted.maxX) < max(24, (predicted.maxX - old.maxX) * 0.5)
-        let wrappedBelow = reported.midY < old.midY - line * 0.5 && reported.midY > old.midY - line * 3.5
-            && reported.minX >= style.lineStartX - 4 && reported.maxX <= style.rightEdgeX + 4
-        return sameLineAsPrediction || wrappedBelow
     }
 
     /// Adds the space needed before `text` given what's already in the document.
     private func spaced(_ text: String) -> String {
-        if !typedText.isEmpty { return " " + text }
         guard prefs.smartSpacing else { return text }
         return TextInserter.applySmartSpacing(text, after: focus?.precedingCharacter)
     }

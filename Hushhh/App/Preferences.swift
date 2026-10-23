@@ -80,9 +80,6 @@ final class Preferences: ObservableObject {
     @Published var holdToTalk: Bool { didSet { defaults.set(holdToTalk, forKey: "holdToTalk") } }
     @Published var useGPU: Bool { didSet { defaults.set(useGPU, forKey: "useGPU") } }
     @Published var showHints: Bool { didSet { defaults.set(showHints, forKey: "showHints") } }
-    /// Type words into the field once they've been stable for `commitDelay` seconds.
-    @Published var liveTyping: Bool { didSet { defaults.set(liveTyping, forKey: "liveTyping") } }
-    @Published var commitDelay: Double { didSet { defaults.set(commitDelay, forKey: "commitDelay") } }
     /// Tab during dictation sends the text to Claude Haiku for clean-up.
     @Published var polishEnabled: Bool { didSet { defaults.set(polishEnabled, forKey: "polishWithClaude") } }
     /// Which model cleans up text. Base URL and model are remembered per provider.
@@ -109,8 +106,6 @@ final class Preferences: ObservableObject {
             "holdToTalk": false,
             "useGPU": true,
             "showHints": true,
-            "liveTyping": false,
-            "commitDelay": 3.0,
             "polishWithClaude": false,
             "diagnosticLog": false,
             "hasCompletedOnboarding": false,
@@ -123,13 +118,8 @@ final class Preferences: ObservableObject {
         holdToTalk = defaults.bool(forKey: "holdToTalk")
         useGPU = defaults.bool(forKey: "useGPU")
         showHints = defaults.bool(forKey: "showHints")
-        // Ghost text until accept is now the default; switch earlier installs over once.
-        if !defaults.bool(forKey: "migratedGhostDefault") {
-            defaults.set(false, forKey: "liveTyping")
-            defaults.set(true, forKey: "migratedGhostDefault")
-        }
-        liveTyping = defaults.bool(forKey: "liveTyping")
-        commitDelay = defaults.double(forKey: "commitDelay")
+        // Settings from the removed live-typing option; nothing reads them any more.
+        for stale in ["liveTyping", "commitDelay", "migratedGhostDefault"] { defaults.removeObject(forKey: stale) }
         // Polish sends text off the Mac, so new installs start with it off. Installs that
         // already relied on the old default keep it on.
         // (Check the saved settings only: registered defaults would answer for a missing key.)

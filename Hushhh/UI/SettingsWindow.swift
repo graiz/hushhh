@@ -120,30 +120,6 @@ struct TypingSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Type words as you speak", isOn: $prefs.liveTyping)
-                if prefs.liveTyping {
-                    LabeledContent("Wait before typing") {
-                        HStack {
-                            Slider(value: $prefs.commitDelay, in: 1...6, step: 0.5)
-                                .frame(width: 160)
-                                .accessibilityValue("\(prefs.commitDelay, specifier: "%.1f") seconds")
-                            Text("\(prefs.commitDelay, specifier: "%.1f") s")
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, alignment: .trailing)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                }
-            } header: {
-                Text("Live Typing")
-            } footer: {
-                SettingsFooter(prefs.liveTyping
-                     ? "Settled words are typed into the field as you speak; the newest stay as ghost text. A longer wait is more accurate."
-                     : "Words stay as ghost text until you press Caps Lock, so nothing changes in the document until then.")
-            }
-
-            Section {
                 Picker("Insert method", selection: $prefs.insertion) {
                     ForEach(InsertionMethod.allCases) { Text($0.title).tag($0) }
                 }

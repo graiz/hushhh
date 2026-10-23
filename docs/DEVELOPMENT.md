@@ -28,8 +28,8 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
 
 - A session event tap catches Caps Lock (as F18): press once to start and again to finish. Hold-to-talk is optional. Esc cancels. Tab polishes, when enabled. The tap only reacts to those keys.
 - Audio is captured at 16 kHz and re-transcribed every ~300 ms, so the ghost text fills in as you speak. Caps Lock runs a final pass over the whole recording and pastes the result in one step, so a single undo removes it.
-- With **live typing** on (Settings › General), each word is typed into the field once it has stayed the same for the commit delay (3 s by default). Esc and Tab then replace that typed text only in apps that let Hushhh select it and confirm it matches.
-- **Finding the cursor.** Hushhh uses the first method that works for the app, and checks each later position against its own estimate:
+- Words stay as ghost text, updated as you speak, until Caps Lock inserts them or Tab polishes and inserts them. Nothing is typed into the field before that.
+- **Finding the cursor.** Hushhh uses the first method that works for the app:
   1. Accessibility character positions (most native apps, Chrome, Safari).
   2. Text markers, WebKit's and Chromium's position API for rich web editors.
   3. A web editor's own caret element (Google Docs).

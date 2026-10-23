@@ -121,20 +121,6 @@ final class OverlayController {
         }
     }
 
-    /// Moves the ghost text after the caret has moved (e.g. after committed words were typed).
-    func move(to anchor: Anchor) {
-        guard isShown else { return }
-        self.anchor = anchor
-        if isInline {
-            model.placement = .inline
-        } else {
-            model.placement = .pill
-            ghostPanel.orderOut(nil)
-            if case .caret(let rect) = anchor { model.fontSize = min(16, max(12, rect.height * 0.7)) }
-        }
-        layout()
-    }
-
     private var visiblePanels: [OverlayPanel] {
         isInline && !model.phase.isMessage ? [ghostPanel, panel] : [panel]
     }
