@@ -207,7 +207,7 @@ struct FocusContext {
                 source = .hiddenInput
                 isEditable = true
                 let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
-                let font = reported?.font ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
+                let font = reported?.font ?? codeEditorFont(bundleID: targetPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }) ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
                 let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
                 var built = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
                                         lineStartX: min(lineStart ?? inputCaret.minX, inputCaret.minX),
@@ -317,14 +317,18 @@ struct FocusContext {
             // Web views report only the size; identify the family from how wide the
             // text before the caret really is.
             if let reported = font, reported.fontName.hasPrefix("."), !isTerminal, range.location > 0 {
-                font = matchFont(element, before: range.location, size: reported.pointSize, lineHeight: caret.height) ?? reported
+                font = matchFont(element, before: range.location, size: reported.pointSize, lineHeight: caret.height,
+                                 preferred: codeSettings(bundleID: bundleID).families) ?? reported
             }
             var cursorWidth: CGFloat = 0
             if isTerminal, range.location > 0, let cell = lastVisibleCell(element, before: range.location) {
                 // Terminals (Terminal.app) report no font: use a monospaced one sized to the
                 // character cell. Trailing spaces are reported as zero width, so count
                 // cells on from the last visible character to find the cursor.
-                font = font ?? monospacedFont(cellWidth: cell.box.width)
+                let profile = bundleID == "com.apple.Terminal"
+                    ? terminalProfileFamily().flatMap { EditorFonts.font(family: $0, cellWidth: cell.box.width) }
+                    : nil
+                font = font ?? profile ?? monospacedFont(cellWidth: cell.box.width)
                 cursorWidth = cell.box.width
                 caret = CGRect(x: cell.box.maxX + CGFloat(cell.spacesAfter) * cell.box.width, y: cell.box.minY,
                                width: 1, height: cell.box.height)
@@ -551,6 +555,46 @@ struct FocusContext {
         return (CGRect(x: x, y: top - cellHeight, width: 1, height: cellHeight), font, cellWidth, paddingX, preceding)
     }
 
+    /// Fonts apps name in their settings, read the first time a dictation session needs
+    /// them and kept until the next session starts (see `beginSession`). Never re-read
+    /// on a timer or while typing.
+    private static var codeSettingsCache: [String: (families: [String], size: CGFloat?)] = [:]
+    /// Terminal's default profile font family; `.some(nil)` once read and absent.
+    private static var terminalFamilyCache: String??
+
+    /// Call when a dictation session starts, so app settings changed since the last
+    /// session are picked up once, when they're next needed.
+    static func beginSession() {
+        codeSettingsCache = [:]
+        terminalFamilyCache = nil
+    }
+
+    private static func codeSettings(bundleID: String?) -> (families: [String], size: CGFloat?) {
+        guard let bundleID, let folder = EditorFonts.codeSettingsFolders[bundleID] else { return ([], nil) }
+        if let cached = codeSettingsCache[bundleID] { return cached }
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/\(folder)/User/settings.json")
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? "{}"
+        let found = (families: EditorFonts.codeFamilies(settings: text), size: EditorFonts.codeFontSize(settings: text))
+        codeSettingsCache[bundleID] = found
+        return found
+    }
+
+    private static func terminalProfileFamily() -> String? {
+        if let cached = terminalFamilyCache { return cached }
+        let family = EditorFonts.terminalProfileFont(defaults: UserDefaults(suiteName: "com.apple.Terminal"))?.familyName
+        terminalFamilyCache = .some(family)
+        return family
+    }
+
+    /// The editor font a code editor names in its settings, at its size (12 pt by default).
+    private static func codeEditorFont(bundleID: String?) -> NSFont? {
+        let settings = codeSettings(bundleID: bundleID)
+        return settings.families.lazy.compactMap {
+            NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: settings.size ?? 12)
+        }.first
+    }
+
     /// Fonts commonly used on the web and in apps, tried when an app reports a font size
     /// but not its family.
     private static let candidateFamilies = [
@@ -566,7 +610,8 @@ struct FocusContext {
     /// every caret update.
     private static var fontCache: (key: Int, size: CGFloat, font: NSFont?, time: Date)?
 
-    private static func matchFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat) -> NSFont? {
+    private static func matchFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat,
+                                  preferred: [String]) -> NSFont? {
         let key = Int(CFHash(element))
         if let cached = fontCache, cached.key == key, cached.size == size, Date().timeIntervalSince(cached.time) < 120 {
             return cached.font
@@ -574,12 +619,13 @@ struct FocusContext {
         // Up to ~30 lookups: keep each one short so an unresponsive app can't stall us.
         AXUIElementSetMessagingTimeout(element, 0.05)
         defer { AXUIElementSetMessagingTimeout(element, 0.25) }
-        let font = measureFont(element, before: location, size: size, lineHeight: lineHeight)
+        let font = measureFont(element, before: location, size: size, lineHeight: lineHeight, preferred: preferred)
         fontCache = (key, size, font, Date())
         return font
     }
 
-    private static func measureFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat) -> NSFont? {
+    private static func measureFont(_ element: AXUIElement, before location: Int, size: CGFloat, lineHeight: CGFloat,
+                                    preferred: [String]) -> NSFont? {
         // Up to 30 characters before the caret, on the caret's line.
         var start = max(0, location - 30)
         var sample = string(element, CFRange(location: start, length: location - start)) ?? ""
@@ -613,7 +659,7 @@ struct FocusContext {
 
         var best = NSFont.systemFont(ofSize: size)
         var bestError = error(best)
-        for family in candidateFamilies {
+        for family in preferred + candidateFamilies.filter({ !preferred.contains($0) }) {
             guard let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size) else { continue }
             let e = error(font)
             if e < bestError { best = font; bestError = e }
@@ -655,16 +701,10 @@ struct FocusContext {
     /// Reads simple `key = value` lines from Ghostty's config file.
     private static func ghosttyConfig() -> [String: String] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let paths = [".config/ghostty/config", "Library/Application Support/com.mitchellh.ghostty/config"]
         var result: [String: String] = [:]
-        for path in paths {
-            guard let text = try? String(contentsOf: home.appendingPathComponent(path), encoding: .utf8) else { continue }
-            for line in text.split(separator: "\n") {
-                let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-                if parts.count == 2, !parts[0].hasPrefix("#") {
-                    result[parts[0]] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                }
-            }
+        for url in EditorFonts.ghosttyConfigPaths(home: home, xdgConfigHome: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]) {
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            EditorFonts.parseKeyValues(text, into: &result)
         }
         return result
     }

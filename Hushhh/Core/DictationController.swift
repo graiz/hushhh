@@ -216,6 +216,7 @@ final class DictationController: ObservableObject {
     // MARK: Session
 
     private func start() {
+        FocusContext.beginSession()
         let permissions = Permissions.shared
         permissions.refresh()
 
