@@ -236,6 +236,7 @@ final class OverlayController {
         }
         ghostPanel.setFrame(panelFrame, display: false)
         ghostView.arrange(textOrigin: CGPoint(x: ghostFrame.minX - panelFrame.minX, y: panelFrame.maxY - ghostFrame.maxY),
+                          background: style.background,
                           cover: style.replacing.map {
                               let r = $0.insetBy(dx: -4, dy: -3)
                               return CGRect(x: r.minX - panelFrame.minX, y: panelFrame.maxY - r.maxY, width: r.width, height: r.height)
@@ -359,9 +360,9 @@ final class OverlayController {
     }
 }
 
-/// Ghost text plus a scrim: once the text wraps onto a second line, a blurred
-/// backdrop fades in behind it so it stays readable over whatever is below. The
-/// scrim follows the text's shape, so it never covers the caret's line before the caret.
+/// Ghost text plus a scrim: whenever there is ghost text, a backdrop in the field's
+/// own colour sits behind it so it stays readable over whatever is below. The scrim
+/// follows the text's shape, so it never covers the caret's line before the caret.
 final class GhostContainerView: NSView {
     static let padding: CGFloat = 8
 
@@ -406,16 +407,17 @@ final class GhostContainerView: NSView {
         = (0, 0, 0, 0, 0, true)
     private var lastLineRects: [CGRect] = []
 
-    /// Positions the text inside the panel and shapes the scrim. `cover` is selected
-    /// text (in this view's coordinates) that the scrim must hide.
-    func arrange(textOrigin: CGPoint, cover: CGRect?) {
+    /// Positions the text inside the panel and shapes the scrim. `background` is the
+    /// field's reported colour, if any; `cover` is selected text (in this view's
+    /// coordinates) that the scrim must hide.
+    func arrange(textOrigin: CGPoint, background: NSColor?, cover: CGRect?) {
         text.frame = CGRect(origin: textOrigin, size: CGSize(width: last.width, height: last.height))
         scrim.frame = bounds
-        scrim.fill = Self.backdrop(for: textColor)
+        scrim.fill = Self.backdrop(reported: background) ?? Self.backdrop(for: textColor)
         scrim.shape = Self.shape(textOrigin: textOrigin, lineRects: lastLineRects, cover: cover)
         scrim.needsDisplay = true
 
-        let wantsScrim = last.lines >= 2 || (cover != nil && !last.empty)
+        let wantsScrim = !last.empty
         if wantsScrim != isScrimVisible {
             isScrimVisible = wantsScrim
             NSAnimationContext.runAnimationGroup { context in
@@ -423,6 +425,13 @@ final class GhostContainerView: NSView {
                 scrim.animator().alphaValue = wantsScrim ? 1 : 0
             }
         }
+    }
+
+    /// The field's reported background, unless it's see-through (web views often report
+    /// a clear background), which wouldn't hide what's below.
+    private static func backdrop(reported: NSColor?) -> NSColor? {
+        guard let reported, reported.alphaComponent > 0.5 else { return nil }
+        return reported.withAlphaComponent(0.96)
     }
 
     /// The page's own background, inferred from its text colour: dark text means a light

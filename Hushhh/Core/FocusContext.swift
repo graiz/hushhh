@@ -59,6 +59,8 @@ struct FocusContext {
         /// Native text views put extra line spacing below the text, so ghost text aligns
         /// to the top of the caret. Web pages (CSS) and terminals centre it in the line.
         var alignsToTop = false
+        /// The field's own background colour, when the app reports it.
+        var background: NSColor?
     }
 
     static let terminalBundleIDs: Set<String> = [
@@ -167,6 +169,7 @@ struct FocusContext {
                                     lineStartX: min(found.lineStartX ?? markerCaret.minX, markerCaret.minX),
                                     rightEdgeX: rightEdge, singleLine: role == kAXTextFieldRole)
             built.replacing = found.selection.map(toCocoa)
+            built.background = style.background
             fallbackInline = built
         }
 
@@ -205,9 +208,11 @@ struct FocusContext {
                 let reported = range.map { textStyle(element, range: $0, hasPreceding: preceding != nil, pid: targetPID) }
                 let font = reported?.font ?? NSFont.systemFont(ofSize: min(28, max(11, found.height / 1.35)))
                 let lineStart = line.flatMap { HiddenInput.isLineClass(lineNode.flatMap { copyValue($0, "AXDOMClassList") } ?? []) ? toCocoa($0).minX : nil }
-                fallbackInline = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
-                                             lineStartX: min(lineStart ?? inputCaret.minX, inputCaret.minX),
-                                             rightEdgeX: inputCaret.minX + 480, singleLine: false)
+                var built = InlineStyle(caret: inputCaret, font: font, color: reported?.color,
+                                        lineStartX: min(lineStart ?? inputCaret.minX, inputCaret.minX),
+                                        rightEdgeX: inputCaret.minX + 480, singleLine: false)
+                built.background = reported?.background
+                fallbackInline = built
             }
         }
 
@@ -243,9 +248,11 @@ struct FocusContext {
             if let estimate = estimateCaret(in: textFrame, text: value ?? "", upTo: range.location, font: font) {
                 caret = estimate
                 source = .estimated
-                fallbackInline = InlineStyle(caret: estimate, font: font, color: reported.color,
-                                             lineStartX: textFrame.minX, rightEdgeX: textFrame.maxX,
-                                             singleLine: frame.height < estimate.height * 1.8 && role != kAXTextAreaRole)
+                var built = InlineStyle(caret: estimate, font: font, color: reported.color,
+                                        lineStartX: textFrame.minX, rightEdgeX: textFrame.maxX,
+                                        singleLine: frame.height < estimate.height * 1.8 && role != kAXTextAreaRole)
+                built.background = reported.background
+                fallbackInline = built
             }
         }
 
@@ -327,6 +334,7 @@ struct FocusContext {
             built.cursorWidth = cursorWidth
             built.bounds = frame.flatMap { isUsable($0) ? $0 : nil }
             built.alignsToTop = !isTerminal && !isWeb
+            built.background = style.background
             if range.length > 0, let selected = bounds(element, for: range), selected.height > 1, selected.origin != .zero {
                 built.replacing = toCocoa(selected)
             }
@@ -346,17 +354,17 @@ struct FocusContext {
     }
 
     /// Font and colour of the text next to the caret.
-    private static func textStyle(_ element: AXUIElement, range: CFRange, hasPreceding: Bool, pid: pid_t?) -> (font: NSFont?, color: NSColor?) {
+    private static func textStyle(_ element: AXUIElement, range: CFRange, hasPreceding: Bool, pid: pid_t?) -> (font: NSFont?, color: NSColor?, background: NSColor?) {
         var probe = CFRange(location: hasPreceding ? range.location - 1 : range.location, length: 1)
-        guard let param = AXValueCreate(.cfRange, &probe) else { return (nil, nil) }
+        guard let param = AXValueCreate(.cfRange, &probe) else { return (nil, nil, nil) }
         var value: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(element, kAXAttributedStringForRangeParameterizedAttribute as CFString, param, &value) == .success,
-              let attributed = value as? NSAttributedString, attributed.length > 0 else { return (nil, nil) }
+              let attributed = value as? NSAttributedString, attributed.length > 0 else { return (nil, nil, nil) }
         return textStyle(from: attributed.attributes(at: 0, effectiveRange: nil), pid: pid)
     }
 
-    /// Font and colour from the attributes an app reports for a run of text.
-    private static func textStyle(from attrs: [NSAttributedString.Key: Any], pid: pid_t?) -> (font: NSFont?, color: NSColor?) {
+    /// Font, colour and background from the attributes an app reports for a run of text.
+    private static func textStyle(from attrs: [NSAttributedString.Key: Any], pid: pid_t?) -> (font: NSFont?, color: NSColor?, background: NSColor?) {
         var font: NSFont?
         if let info = attrs[NSAttributedString.Key("AXFont")] as? [String: Any],
            let size = (info["AXFontSize"] as? NSNumber).map({ CGFloat($0.doubleValue) }) {
@@ -373,12 +381,11 @@ struct FocusContext {
                 font = NSFont.systemFont(ofSize: size)
             }
         }
-        var color: NSColor?
-        if let raw = attrs[NSAttributedString.Key("AXForegroundColor")],
-           CFGetTypeID(raw as CFTypeRef) == CGColor.typeID {
-            color = NSColor(cgColor: raw as! CGColor)
+        func colour(_ key: String) -> NSColor? {
+            guard let raw = attrs[NSAttributedString.Key(key)], CFGetTypeID(raw as CFTypeRef) == CGColor.typeID else { return nil }
+            return NSColor(cgColor: raw as! CGColor)
         }
-        return (font, color)
+        return (font, colour("AXForegroundColor"), colour("AXBackgroundColor"))
     }
 
     private static var registeredFontBundles: Set<String> = []
