@@ -83,7 +83,7 @@ struct FocusContext {
         if let targetPID {
             root = AXUIElementCreateApplication(targetPID)
             // Only when dictation starts, never in the background: switching this on costs
-            // Electron and Chromium apps some CPU and memory.
+            // Chromium apps some CPU and memory.
             justEnabled = enableAccessibility(pid: targetPID)
         } else {
             root = AXUIElementCreateSystemWide()
@@ -91,8 +91,9 @@ struct FocusContext {
         AXUIElementSetMessagingTimeout(root, 0.25)
 
         var focused: AXUIElement? = copyElement(root, kAXFocusedUIElementAttribute)
-        if focused == nil, justEnabled {
-            // Chromium builds its accessibility tree just after being asked; give it a moment.
+        if focused == nil, justEnabled || targetPID.map({ appKind(pid: $0) == .electron }) == true {
+            // Chromium and Electron build their accessibility tree just after being asked;
+            // give it one moment.
             usleep(150_000)
             focused = copyElement(root, kAXFocusedUIElementAttribute)
         }
@@ -431,9 +432,6 @@ struct FocusContext {
         return rect
     }
 
-    /// Electron and Chromium apps only build their accessibility tree when an
-    /// assistive app asks for it. Call this when an app becomes active so the
-    /// tree is ready by the time the person starts dictating.
     /// The attributes Hushhh itself switched on, per app, for the current dictation session.
     /// Only these are switched off again; one that was already on belongs to someone else.
     private static var switchedOn: [pid_t: [String]] = [:]
@@ -444,17 +442,23 @@ struct FocusContext {
         return (value as? Bool) == true
     }
 
+    private static func appKind(pid: pid_t) -> AppKind {
+        let running = NSRunningApplication(processIdentifier: pid)
+        return AppKind.of(bundleURL: running?.bundleURL, bundleID: running?.bundleIdentifier)
+    }
+
+    /// Chromium browsers only report text positions once AXEnhancedUserInterface is on, so
+    /// Hushhh switches that on for the session. It never sets AXManualAccessibility: it
+    /// makes VS Code switch into its screen-reader mode, and Electron reads it back as
+    /// false, so Hushhh couldn't tell whether another assistive app had set it and would
+    /// switch that app's setting off on release. Electron builds its tree when queried.
     /// Returns true if this call switched an attribute on.
     @discardableResult
     static func enableAccessibility(pid: pid_t) -> Bool {
         guard switchedOn[pid] == nil else { return false }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        var names = ["AXManualAccessibility"]
-        let running = NSRunningApplication(processIdentifier: pid)
-        if AppKind.of(bundleURL: running?.bundleURL, bundleID: running?.bundleIdentifier) == .chromium {
-            names.append("AXEnhancedUserInterface")
-        }
+        let names = appKind(pid: pid) == .chromium ? ["AXEnhancedUserInterface"] : []
         var set: [String] = []
         for name in names where !isOn(app, name) {
             // Chromium applies the change yet reports cannotComplete, so check the value too.

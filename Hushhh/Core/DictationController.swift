@@ -91,6 +91,8 @@ final class DictationController: ObservableObject {
     func deactivate() {
         hotkeys.stop()
         CapsLockRemapper.disable()
+        // Quitting mid-session skips the usual end-of-session release.
+        FocusContext.releaseAccessibility()
     }
 
     /// The event tap needs Accessibility; keep trying until it's granted.
