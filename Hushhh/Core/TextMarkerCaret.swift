@@ -40,9 +40,11 @@ enum TextMarkerCaret {
             }
         } else if before == nil || preceding?.isNewline == true,
                   let next = marker(host, "AXNextTextMarkerForTextMarker", start),
-                  let box = bounds(host, range(start, next)).flatMap(usable), box.width > 0 {
+                  let box = bounds(host, range(start, next)).flatMap(usable), box.width > 0,
+                  zero.map({ box.height <= $0.height * 1.5 }) ?? true {
             // At the start of a line: the leading edge of the character after the caret.
-            // With an unusable preceding box this is skipped, as the next character may sit on the next line.
+            // With an unusable preceding box this is skipped, as the next character may sit on the next line,
+            // and the collapsed box is used instead when the next character's box spans more than a line, as in an empty field.
             caret = CGRect(x: box.minX, y: box.minY, width: 1, height: box.height)
         } else if let zero {
             caret = CGRect(x: zero.minX, y: zero.minY, width: 1, height: zero.height)
