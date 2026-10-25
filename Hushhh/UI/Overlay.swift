@@ -99,6 +99,20 @@ final class OverlayController {
     func show(anchor: Anchor) {
         hideWork?.cancel()
         isShown = true
+        setAnchor(anchor)
+        layout()
+        for p in visiblePanels {
+            p.alphaValue = 0
+            p.orderFrontRegardless()
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            for p in visiblePanels { p.animator().alphaValue = 1 }
+        }
+    }
+
+    /// Sets the anchor, and the placement and font size that go with it.
+    private func setAnchor(_ anchor: Anchor) {
         self.anchor = anchor
         switch anchor {
         case .inline:
@@ -109,15 +123,6 @@ final class OverlayController {
         case .element, .screen:
             model.placement = .pill
             model.fontSize = 14
-        }
-        layout()
-        for p in visiblePanels {
-            p.alphaValue = 0
-            p.orderFrontRegardless()
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            for p in visiblePanels { p.animator().alphaValue = 1 }
         }
     }
 
@@ -134,7 +139,7 @@ final class OverlayController {
             .priority: NSAccessibilityPriorityLevel.high.rawValue,
         ])
         ghostPanel.orderOut(nil)
-        if !panel.isVisible { show(anchor: anchor) } else { layout() }
+        if !isShown { show(anchor: anchor) } else { layout() }
         let work = DispatchWorkItem { [weak self] in self?.hide() }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
@@ -178,7 +183,7 @@ final class OverlayController {
             origin = CGPoint(x: caret.minX - textInset - margin,
                              y: caret.minY - 6 - size.height + margin)
             if origin.y - margin < visible.minY {
-                origin.y = caret.maxY + 6 - margin   // no room below: show above the line
+                origin.y = caret.maxY + 6 - margin   // above the line: no room below
             }
         case .element(let frame):
             // Below a small field; inside the bottom edge of a large one (a terminal window).
@@ -189,6 +194,13 @@ final class OverlayController {
             origin = CGPoint(x: visible.midX - size.width / 2, y: visible.minY + 72 - margin)
         }
         panel.setFrame(clamp(CGRect(origin: origin, size: size), to: visible), display: true)
+        let anchorRect: CGRect?
+        switch anchor {
+        case .caret(let rect), .element(let rect): anchorRect = rect
+        default: anchorRect = nil
+        }
+        FocusLog.write("overlay bubble chip=\(FocusLog.describe(panel.frame)) textLength=\(model.text.count) "
+            + "caret=\(FocusLog.describe(anchorRect))")
     }
 
     private func layoutInline(_ style: FocusContext.InlineStyle) {
@@ -271,6 +283,10 @@ final class OverlayController {
             if chipGoesAbove { origin = above }
         }
         panel.setFrame(clamp(CGRect(origin: origin, size: size), to: visible), display: true)
+        // Geometry only, never the text, so the diagnostic log can show where the ghost text bounces.
+        FocusLog.write("overlay inline ghost=\(FocusLog.describe(ghostPanel.frame)) chip=\(FocusLog.describe(panel.frame)) "
+            + "above=\(origin == above) scrim=\(ghostView.isScrimVisible) lines=\(ghostView.lineCount) "
+            + "textLength=\(text.count) caret=\(FocusLog.describe(caret))")
     }
 
     /// Cached so the hit-test runs once per position, not on every layout pass.
@@ -369,6 +385,8 @@ final class GhostContainerView: NSView {
     private let scrim = ScrimView()
     private let text = GhostTextView()
     private(set) var isScrimVisible = false
+    /// Lines the ghost text occupied on the last pass.
+    var lineCount: Int { last.lines }
     private var textColor: NSColor = .systemGray
 
     override init(frame: NSRect) {

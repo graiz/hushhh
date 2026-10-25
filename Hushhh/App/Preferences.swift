@@ -118,8 +118,8 @@ final class Preferences: ObservableObject {
         holdToTalk = defaults.bool(forKey: "holdToTalk")
         useGPU = defaults.bool(forKey: "useGPU")
         showHints = defaults.bool(forKey: "showHints")
-        // Settings from the removed live-typing option; nothing reads them any more.
-        for stale in ["liveTyping", "commitDelay", "migratedGhostDefault"] { defaults.removeObject(forKey: stale) }
+        // Settings from removed options; nothing reads them any more.
+        for stale in ["liveTyping", "commitDelay", "migratedGhostDefault", "preciseCursorExperimental"] { defaults.removeObject(forKey: stale) }
         // Polish sends text off the Mac, so new installs start with it off. Installs that
         // already relied on the old default keep it on.
         // (Check the saved settings only: registered defaults would answer for a missing key.)

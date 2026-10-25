@@ -19,8 +19,9 @@ final class DictationController: ObservableObject {
     @Published private(set) var state: State = .idle {
         didSet {
             guard state == .idle, oldValue != .idle else { return }
-            // Every session ends here. Release on the next turn so the insert or paste that
-            // follows `state = .idle` (it posts its keys synchronously) lands first.
+            // Every session ends here. Release on the next turn so an insert or paste that
+            // follows `state = .idle` (it posts its keys synchronously) lands first. A
+            // two-step finish sets it only after its second part has been posted.
             DispatchQueue.main.async { [weak self] in
                 if self?.state == .idle { FocusContext.releaseAccessibility() }
             }
@@ -360,17 +361,82 @@ final class DictationController: ObservableObject {
         guard state == .listening, let live else { return }
         state = .finishing
         maxDurationWork?.cancel()
-        overlay.model.phase = .finishing
-        overlay.layout()
+        // Dismiss at the keypress, on both paths; the text lands when it's ready.
+        overlay.hide()
 
         Task {
-            // Keep the last syllable that was still in flight when the key was pressed.
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            self.teardownAudio(keepTranscriber: true)
-            let text = await live.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+            // Paste what's settled at once, so a long dictation lands without waiting.
+            let settled = live.settledSnapshot()
+            let firstPaste = settled.text.isEmpty ? nil : self.firstPart(settled.text)
+            // Runs alongside the finish below; the second part waits for the app to read it.
+            let firstInsert = firstPaste.map { text in
+                Task { await TextInserter.insertAndWait(text, method: self.prefs.insertion, restoringClipboard: false) }
+            }
+            await live.stopPartials()
+            let rest: String
+            if let quiet = live.quietRest(after: settled.upTo) {
+                // The end of the recording is quiet, so the newest partial is the rest of the answer.
+                self.teardownAudio(keepTranscriber: true)
+                rest = quiet
+            } else {
+                // Keep the last syllable that was still in flight when the key was pressed.
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                self.teardownAudio(keepTranscriber: true)
+                rest = await live.transcribeRest(after: settled.upTo)
+            }
             self.live = nil
-            self.finishSession(with: text)
+            if let firstPaste, let firstInsert {
+                let first = await firstInsert.value
+                await self.finishContinuation(rest, after: firstPaste, first: first)
+            } else {
+                self.finishSession(with: SpeechSegmenter.join(settled.text, rest))
+            }
         }
+    }
+
+    /// The first part of a dictation as it will be inserted while the rest is still being
+    /// finished, or nil when it can't go into the field (so `finishSession` handles all of it).
+    private func firstPart(_ text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let focus, focus.element != nil, focus.isEditable || focus.caretRect != nil,
+              focusUnchanged() else { return nil }
+        return spaced(text)
+    }
+
+    /// Inserts the rest of a dictation right after its first part, so the two read as one.
+    /// Call once the first insert has returned. If the app hasn't read the first part, a
+    /// second paste could land before it, so the whole dictation is left on the clipboard
+    /// instead (see `TwoStepFinish`). The session stays `.finishing` until the second part
+    /// is in, so no new one starts mid-sequence.
+    private func finishContinuation(_ rest: String, after firstPaste: String, first: TextInserter.Inserted) async {
+        defer { state = .idle }
+        // Read now, not at the 1 s timeout, so a read that came in since still gets the rest
+        // pasted. A read arriving after the copy below is an accepted trade-off: the app then
+        // pastes the whole dictation from the clipboard.
+        switch TwoStepFinish.decide(firstPaste: firstPaste, rest: rest, firstWasRead: first.wasRead) {
+        case .restoreClipboard:
+            TextInserter.restoreClipboard()
+        case .copy(let text):
+            // The clipboard now holds the dictation, so the person's isn't restored.
+            TextInserter.copyToClipboard(text)
+            flashCopiedDictation()
+        case .pasteRest(let text):
+            guard focusUnchanged() else {
+                // Never insert into an app the person switched to between the two parts.
+                TextInserter.copyToClipboard(SpeechSegmenter.continuation(rest, after: ""))
+                overlay.flash(symbol: "doc.on.clipboard", text: "You switched apps — copied to clipboard", duration: 2.2)
+                break
+            }
+            let second = await TextInserter.insertAndWait(text, method: prefs.insertion)
+            // Unread, the rest was left on the clipboard.
+            if !second.wasRead { flashCopiedDictation() }
+        }
+        Sound.play(.insert)
+    }
+
+    /// Shown when the app didn't read a paste in time and the text was left on the clipboard.
+    private func flashCopiedDictation() {
+        overlay.flash(symbol: "doc.on.clipboard", text: "Dictation copied — press ⌘V", duration: 3)
     }
 
     /// Finishes dictation and replaces the text with a model's cleaned-up version.
@@ -385,7 +451,7 @@ final class DictationController: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 150_000_000)
             self.teardownAudio(keepTranscriber: true)
-            let text = await live.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = await live.finishFast().trimmingCharacters(in: .whitespacesAndNewlines)
             self.live = nil
             guard !text.isEmpty else {
                 self.overlay.model.busyLabel = nil
@@ -410,7 +476,7 @@ final class DictationController: ObservableObject {
                 let final = self.prefs.smartSpacing
                     ? TextInserter.applySmartSpacing(polished, after: focus.precedingCharacter) : polished
                 // Paste, so paragraph breaks don't press Return (which sends in chat apps).
-                TextInserter.insert(final, method: .paste)
+                TextInserter.insert(final, method: .paste) { [weak self] in self?.flashCopiedDictation() }
                 Sound.play(.insert)
             } catch {
                 self.overlay.model.busyLabel = nil
@@ -442,7 +508,7 @@ final class DictationController: ObservableObject {
         }
         overlay.hide()
         let final = prefs.smartSpacing ? TextInserter.applySmartSpacing(text, after: focus.precedingCharacter) : text
-        TextInserter.insert(final, method: prefs.insertion)
+        TextInserter.insert(final, method: prefs.insertion) { [weak self] in self?.flashCopiedDictation() }
         Sound.play(.insert)
     }
 

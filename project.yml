@@ -64,6 +64,9 @@ targets:
     sources:
       - path: HushhhTests
       - path: Hushhh/Core/Placement
+      - path: Hushhh/Core/Logic
+      - path: Hushhh/Core/LiveTranscriber.swift
+      - path: Hushhh/Engines/SpeechEngineProtocol.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

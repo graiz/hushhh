@@ -21,9 +21,10 @@ enum FocusLog {
         return f
     }()
 
-    static func write(_ message: String) {
+    /// `message` is only built when the log is on.
+    static func write(_ message: @autoclosure () -> String) {
         guard isEnabled else { return }
-        let line = "\(formatter.string(from: Date())) \(message)\n"
+        let line = "\(formatter.string(from: Date())) \(message())\n"
         queue.async {
             if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 512_000 {
                 try? FileManager.default.removeItem(at: url)

@@ -36,9 +36,18 @@ enum Diagnostics {
             guard let samples = loadSamples(file) else { print("Couldn’t read \(file)"); exit(1) }
             let live = LiveTranscriber(engineProvider: { engine })
             let began = Date()
+            live.onSettle = { text, end in
+                let t = String(format: "%5.1fs", Date().timeIntervalSince(began))
+                let at = Double(end) / Double(LiveTranscriber.sampleRate)
+                print(String(format: "%@  settled to %.2fs: %@", t, at, text))
+            }
             live.onPartial = { text in
                 let t = String(format: "%5.1fs", Date().timeIntervalSince(began))
-                print("\(t)  partial: \(text)")
+                // The settled part, then the live part after " | ".
+                let settled = live.settledSnapshot().text
+                let split = !settled.isEmpty && text.hasPrefix(settled)
+                    ? settled + " |" + text.dropFirst(settled.count) : "| " + text
+                print("\(t)  partial: \(split)")
             }
             live.start()
             // Feed the audio in real time, 100 ms at a time, like the microphone does.
