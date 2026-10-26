@@ -51,9 +51,6 @@ final class DictationController: ObservableObject {
     private var hotkeyRetry: Timer?
 
     private static let maxDuration: TimeInterval = 5 * 60
-    /// When to look for the caret again after switching an app's accessibility tree on.
-    /// Electron apps take about 2 s to build it.
-    private static let refineDelays: [TimeInterval] = [0.8, 1.6, 2.5]
     private static let holdThreshold: TimeInterval = 0.45
 
     private init() {
@@ -223,9 +220,6 @@ final class DictationController: ObservableObject {
         // Before capture, so what capture logs about this session is written.
         FocusLog.isEnabled = prefs.diagnosticLog
         let context = FocusContext.capture()
-        // Read now: it describes the capture above. Accessibility it switched on stays on
-        // until Hushhh quits.
-        let treeJustEnabled = FocusContext.lastCaptureJustEnabled
         focus = context
         if context.isSecure {
             overlay.show(anchor: .screen)
@@ -310,14 +304,16 @@ final class DictationController: ObservableObject {
         overlay.model.canPolish = prefs.polishEnabled && PolishService.isAvailable
         overlay.show(anchor: anchor)
 
-        if treeJustEnabled, context.caretRect == nil, context.inline == nil, let pid = context.appPID {
-            // The app is still building its accessibility tree (about 2 s for Electron), so
-            // look again a few times rather than block the start.
+        // Accessibility switched on for this app (now or in a session moments ago) stays on
+        // until Hushhh quits. While the app is still building its tree (about 2 s for
+        // Electron), look again at the times still ahead rather than block the start.
+        if context.caretRect == nil, context.inline == nil, let pid = context.appPID,
+           let elapsed = FocusContext.secondsSinceEnabled(pid: pid, within: RefineSchedule.delays.last ?? 0) {
             let token = UUID()
             refineToken = token
-            for delay in Self.refineDelays {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    self?.refineCaret(token: token, pid: pid, delay: delay)
+            for look in RefineSchedule.pending(after: elapsed) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + look.wait) { [weak self] in
+                    self?.refineCaret(token: token, pid: pid, delay: look.delay)
                 }
             }
         }
@@ -343,12 +339,20 @@ final class DictationController: ObservableObject {
     /// Looks for the caret again in an app whose accessibility tree was just switched on.
     /// The first look that finds it moves the overlay there and cancels the rest.
     private func refineCaret(token: UUID, pid: pid_t, delay: TimeInterval) {
-        guard refineToken == token, state == .listening,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+        guard refineToken == token else { return }
+        // Also while the microphone is still opening, so an early look isn't lost.
+        guard state == .listening || state == .starting else {
+            FocusLog.write("refine after=\(delay)s skipped state=\(state)")
+            return
+        }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+            FocusLog.write("refine after=\(delay)s skipped app changed")
+            return
+        }
         let context = FocusContext.capture(pid: pid)
         guard !context.isSecure, context.inline != nil || context.caretRect != nil else {
             FocusLog.write("refine after=\(delay)s caret=nil")
-            if delay == Self.refineDelays.last { refineToken = nil }
+            if delay == RefineSchedule.delays.last { refineToken = nil }
             return
         }
         refineToken = nil

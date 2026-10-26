@@ -101,14 +101,13 @@ struct FocusContext {
         } else {
             root = AXUIElementCreateSystemWide()
         }
-        lastCaptureJustEnabled = justEnabled
         AXUIElementSetMessagingTimeout(root, 0.25)
 
         var focused: AXUIElement? = copyElement(root, kAXFocusedUIElementAttribute)
         if focused == nil, let targetPID, justEnabled, appKind(pid: targetPID) != .electron {
             // Chromium browsers build their accessibility tree just after being asked; give
-            // it one moment. Electron apps take about 2 s, far too long to block for, so
-            // DictationController captures again a little later instead.
+            // it one moment. Electron apps take about 2 s, far too long to block for. For
+            // both, DictationController captures again a little later if this finds no caret.
             usleep(150_000)
             focused = copyElement(root, kAXFocusedUIElementAttribute)
         }
@@ -471,16 +470,50 @@ struct FocusContext {
         return rect
     }
 
-    /// True when the latest `capture` switched an app's accessibility on, so its tree
-    /// may still be building and a capture shortly after can find more.
-    private(set) static var lastCaptureJustEnabled = false
+    /// What Hushhh did to one running app's accessibility.
+    private struct Switched {
+        /// The attributes Hushhh itself switched on.
+        var names: [String]
+        /// The app's launch date, so an entry never applies to a later app given the same pid.
+        var launched: Date?
+        /// When Hushhh switched them on; nil if it switched nothing on.
+        var enabledAt: Date?
+    }
 
-    /// The attributes Hushhh itself switched on, per app. They stay on until Hushhh quits
-    /// (or the app does): an Electron app takes about 2 s to build its tree, so switching
+    /// The attributes Hushhh itself switched on, per running app. They stay on until Hushhh
+    /// quits (or the app does): an Electron app takes about 2 s to build its tree, so switching
     /// it on for each session would leave every dictation without a caret for 2 s. An app
     /// listed here, even with nothing switched on, isn't asked again. Only these are
     /// switched off again; one that was already on belongs to someone else.
-    private static var switchedOn: [pid_t: [String]] = [:]
+    private static var switchedOn: [pid_t: Switched] = [:]
+    private static var terminationObserver: NSObjectProtocol?
+
+    /// The entry for the app now running as `pid`, ignoring one left by an earlier app with that pid.
+    private static func entry(pid: pid_t) -> Switched? {
+        guard let entry = switchedOn[pid],
+              let running = NSRunningApplication(processIdentifier: pid),
+              running.launchDate == entry.launched else { return nil }
+        return entry
+    }
+
+    /// Seconds since Hushhh switched this app's accessibility on, while that's still under
+    /// `limit`: its tree may still be building, so a capture a little later can find more.
+    static func secondsSinceEnabled(pid: pid_t, within limit: TimeInterval) -> TimeInterval? {
+        guard let enabledAt = entry(pid: pid)?.enabledAt else { return nil }
+        let elapsed = Date().timeIntervalSince(enabledAt)
+        return elapsed < limit ? elapsed : nil
+    }
+
+    /// Forgets an app's entry when it quits; its setting went with it.
+    private static func observeTerminations() {
+        guard terminationObserver == nil else { return }
+        terminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let entry = switchedOn[app.processIdentifier], entry.launched == app.launchDate else { return }
+            switchedOn[app.processIdentifier] = nil
+        }
+    }
 
     private static func isOn(_ app: AXUIElement, _ name: String) -> Bool {
         var value: CFTypeRef?
@@ -503,7 +536,9 @@ struct FocusContext {
     /// Returns true if this call switched an attribute on.
     @discardableResult
     static func enableAccessibility(pid: pid_t) -> Bool {
-        guard switchedOn[pid] == nil else { return false }
+        // An entry from an earlier app that had this pid is replaced.
+        guard entry(pid: pid) == nil else { return false }
+        observeTerminations()
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
         let running = NSRunningApplication(processIdentifier: pid)
@@ -517,7 +552,7 @@ struct FocusContext {
             let result = AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanTrue)
             if result == .success || isOn(app, name) { set.append(name) }
         }
-        switchedOn[pid] = set
+        switchedOn[pid] = Switched(names: set, launched: running?.launchDate, enabledAt: set.isEmpty ? nil : Date())
         return !set.isEmpty
     }
 
@@ -526,11 +561,13 @@ struct FocusContext {
     /// diagnostic run ends). Attributes that were already on (another assistive app's) are
     /// left alone: switching them off would break that app.
     static func releaseAccessibility() {
-        // Apps that have quit since took their setting with them.
-        for (pid, attributes) in switchedOn where NSRunningApplication(processIdentifier: pid) != nil {
+        // Apps that have quit took their setting with them; a later app with the same pid
+        // is someone else's and is left alone.
+        for pid in switchedOn.keys {
+            guard let names = entry(pid: pid)?.names, !names.isEmpty else { continue }
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(app, 0.25)
-            for name in attributes { AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanFalse) }
+            for name in names { AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanFalse) }
         }
         switchedOn = [:]
     }
