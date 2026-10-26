@@ -61,4 +61,23 @@ final class AppKindTests: XCTestCase {
         XCTAssertTrue(AppKind.codeEditorBundleIDs.contains("com.todesktop.230313mzl4w4u92"))
         XCTAssertFalse(AppKind.codeEditorBundleIDs.contains("com.tinyspeck.slackmacgap"))
     }
+
+    func testEnhancedUIIsManagedForChromiumAndElectron() {
+        XCTAssertTrue(AppKind.shouldManageEnhancedUI(kind: .chromium, bundleID: "com.google.Chrome", override: nil))
+        XCTAssertTrue(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: "com.anthropic.claudefordesktop", override: nil))
+        XCTAssertTrue(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: nil, override: nil))
+        XCTAssertFalse(AppKind.shouldManageEnhancedUI(kind: .native, bundleID: "com.apple.TextEdit", override: nil))
+    }
+
+    func testEnhancedUIIsNeverManagedForCodeEditors() {
+        XCTAssertFalse(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: "com.microsoft.VSCode", override: nil))
+        XCTAssertFalse(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: "com.todesktop.230313mzl4w4u92", override: nil))
+    }
+
+    func testEnhancedUIOverrideWinsBothWays() {
+        XCTAssertFalse(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: "com.tinyspeck.slackmacgap", override: false))
+        XCTAssertFalse(AppKind.shouldManageEnhancedUI(kind: .chromium, bundleID: "com.google.Chrome", override: false))
+        XCTAssertTrue(AppKind.shouldManageEnhancedUI(kind: .native, bundleID: "com.apple.TextEdit", override: true))
+        XCTAssertTrue(AppKind.shouldManageEnhancedUI(kind: .electron, bundleID: "com.microsoft.VSCode", override: true))
+    }
 }

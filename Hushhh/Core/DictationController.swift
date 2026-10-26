@@ -16,17 +16,7 @@ final class DictationController: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .idle {
-        didSet {
-            guard state == .idle, oldValue != .idle else { return }
-            // Every session ends here. Release on the next turn so an insert or paste that
-            // follows `state = .idle` (it posts its keys synchronously) lands first. A
-            // two-step finish sets it only after its second part has been posted.
-            DispatchQueue.main.async { [weak self] in
-                if self?.state == .idle { FocusContext.releaseAccessibility() }
-            }
-        }
-    }
+    @Published private(set) var state: State = .idle
     @Published private(set) var engineState: EngineState = .needsModel
 
     private let prefs = Preferences.shared
@@ -46,6 +36,9 @@ final class DictationController: ObservableObject {
     private var sessionInline: FocusContext.InlineStyle?
     /// Identifies the current microphone start attempt, so a late or timed-out one is ignored.
     private var startToken: UUID?
+    /// Identifies the session whose caret is still being looked for after the app's
+    /// accessibility tree was switched on, so a late re-capture from an earlier session is ignored.
+    private var refineToken: UUID?
     /// True while a microphone start is still blocked inside Core Audio.
     private var audioStartPending = false
     /// Core Audio calls can block for a long time if the audio service is stuck,
@@ -58,6 +51,9 @@ final class DictationController: ObservableObject {
     private var hotkeyRetry: Timer?
 
     private static let maxDuration: TimeInterval = 5 * 60
+    /// When to look for the caret again after switching an app's accessibility tree on.
+    /// Electron apps take about 2 s to build it.
+    private static let refineDelays: [TimeInterval] = [0.8, 1.6, 2.5]
     private static let holdThreshold: TimeInterval = 0.45
 
     private init() {
@@ -92,7 +88,8 @@ final class DictationController: ObservableObject {
     func deactivate() {
         hotkeys.stop()
         CapsLockRemapper.disable()
-        // Quitting mid-session skips the usual end-of-session release.
+        // Accessibility Hushhh switched on stays on while it runs, so each dictation finds the
+        // caret at once; switch it off as Hushhh quits.
         FocusContext.releaseAccessibility()
     }
 
@@ -217,6 +214,8 @@ final class DictationController: ObservableObject {
     // MARK: Session
 
     private func start() {
+        // Any re-capture still scheduled belongs to an earlier session.
+        refineToken = nil
         FocusContext.beginSession()
         let permissions = Permissions.shared
         permissions.refresh()
@@ -224,10 +223,10 @@ final class DictationController: ObservableObject {
         // Before capture, so what capture logs about this session is written.
         FocusLog.isEnabled = prefs.diagnosticLog
         let context = FocusContext.capture()
+        // Read now: it describes the capture above. Accessibility it switched on stays on
+        // until Hushhh quits.
+        let treeJustEnabled = FocusContext.lastCaptureJustEnabled
         focus = context
-        // capture() switched accessibility on. Paths that return before a session begins
-        // never reach `state = .idle`, so they release here.
-        defer { if state == .idle { FocusContext.releaseAccessibility() } }
         if context.isSecure {
             overlay.show(anchor: .screen)
             overlay.flash(symbol: "lock.fill", text: "Hushhh doesn’t dictate into password fields", duration: 2)
@@ -311,6 +310,18 @@ final class DictationController: ObservableObject {
         overlay.model.canPolish = prefs.polishEnabled && PolishService.isAvailable
         overlay.show(anchor: anchor)
 
+        if treeJustEnabled, context.caretRect == nil, context.inline == nil, let pid = context.appPID {
+            // The app is still building its accessibility tree (about 2 s for Electron), so
+            // look again a few times rather than block the start.
+            let token = UUID()
+            refineToken = token
+            for delay in Self.refineDelays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.refineCaret(token: token, pid: pid, delay: delay)
+                }
+            }
+        }
+
         // Open the microphone off the main thread; Core Audio can block.
         let token = UUID()
         startToken = token
@@ -326,6 +337,30 @@ final class DictationController: ObservableObject {
             self.startToken = nil
             self.state = .idle
             self.overlay.flash(symbol: "mic.slash", text: "The microphone isn’t responding. Restart Core Audio or your Mac.", isError: true, duration: 3.5)
+        }
+    }
+
+    /// Looks for the caret again in an app whose accessibility tree was just switched on.
+    /// The first look that finds it moves the overlay there and cancels the rest.
+    private func refineCaret(token: UUID, pid: pid_t, delay: TimeInterval) {
+        guard refineToken == token, state == .listening,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+        let context = FocusContext.capture(pid: pid)
+        guard !context.isSecure, context.inline != nil || context.caretRect != nil else {
+            FocusLog.write("refine after=\(delay)s caret=nil")
+            if delay == Self.refineDelays.last { refineToken = nil }
+            return
+        }
+        refineToken = nil
+        focus = context
+        sessionInline = context.inline
+        FocusLog.write("refine after=\(delay)s editable=\(context.isEditable) caret=\(FocusLog.describe(context.caretRect)) frame=\(FocusLog.describe(context.elementFrame)) inline=\(context.inline != nil) source=\(context.caretSource.rawValue)")
+        if let inline = context.inline {
+            // Inline, show the same leading space that inserting will add.
+            if !overlay.model.text.isEmpty { overlay.model.text = spaced(overlay.model.text) }
+            overlay.show(anchor: .inline(inline))
+        } else if let caret = context.caretRect {
+            overlay.show(anchor: .caret(caret))
         }
     }
 

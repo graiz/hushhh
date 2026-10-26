@@ -1,8 +1,9 @@
 import Foundation
 
 /// The engine an app draws its text with, read from its bundle on disk. Electron and
-/// Chromium apps only build their accessibility tree when asked, and Chromium
-/// browsers also need AXEnhancedUserInterface before they report text positions.
+/// Chromium apps only build their accessibility tree when asked: Chromium browsers
+/// need AXEnhancedUserInterface before they report text positions, and Electron apps
+/// before they report their focused text box.
 enum AppKind: Equatable {
     case electron
     case chromium
@@ -23,6 +24,16 @@ enum AppKind: Equatable {
         "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92",
         "com.exafunction.windsurf", "com.vscodium", "com.google.antigravity",
     ]
+
+    /// Whether Hushhh switches AXEnhancedUserInterface on for this app. Chromium browsers
+    /// only report text positions with it on, and Electron apps (Claude, Slack, Notion)
+    /// only expose their focused text box with it on. Code editors are left alone, since
+    /// they switch into screen-reader mode. An override wins either way.
+    static func shouldManageEnhancedUI(kind: AppKind, bundleID: String?, override: Bool?) -> Bool {
+        if let override { return override }
+        if let bundleID, codeEditorBundleIDs.contains(bundleID) { return false }
+        return kind == .chromium || kind == .electron
+    }
 
     static func classify(bundleID: String?, frameworkNames: [String], hasAppArchive: Bool, infoKeys: Set<String>) -> AppKind {
         // Some Electron apps rename "Electron Framework" after the product; their app

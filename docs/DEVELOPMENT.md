@@ -40,6 +40,7 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
   5. The terminal grid (Ghostty).
   6. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
   7. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
+- **Electron and Chromium apps.** Electron apps (Claude, Slack, Notion, Superhuman) only expose their focused text box, and Chromium browsers only report text positions, once `AXEnhancedUserInterface` is on. Hushhh switches it on at the first dictation in such an app and leaves it on until the app or Hushhh quits: an Electron app takes about 2 s to build its tree, so switching it on for each dictation would leave every one without a caret for that long. The first dictation doesn't wait; it shows the bubble and looks for the caret again at 0.8 s, 1.6 s and 2.5 s, moving the ghost text there once found. VS Code-family editors are excluded (it would switch them into screen-reader mode). Hushhh never sets `AXManualAccessibility`, and only switches off what it switched on itself, never another app's setting.
 - Ghost text is drawn with TextKit in a non-activating panel, so the app you're typing in keeps focus. When the app doesn't report its font family, Hushhh identifies it from where each character sits. The ghost text always sits on a backdrop in the field's own background colour (inferred from the text colour when the app doesn't report it), so it stays readable over whatever is below.
 
 ## Developer diagnostics
@@ -68,7 +69,7 @@ Keys are a bundle ID (`com.apple.TextEdit`), `domain:docs.example.com` for a sit
 - `verticalOffset`: points to move ghost text up (negative: down).
 - `textInset`: points between a field's edge and its text, used where Hushhh measures the text itself (Excel's built-in 4).
 - `greyGhostText`: draw in neutral grey instead of the app's reported text colour.
-- `enhancedUserInterface`: `true` switches AXEnhancedUserInterface on for the session, `false` never does, whatever the app's engine. Hushhh only switches off what it switched on. This field applies per app only; it has no effect in a `domain:` entry.
+- `enhancedUserInterface`: `true` switches AXEnhancedUserInterface on (until the app or Hushhh quits), `false` never does, whatever the app's engine. Hushhh only switches off what it switched on. This field applies per app only; it has no effect in a `domain:` entry.
 
 Site entries win over app entries, and your entries win over built-in ones, field by field. When several site entries match, an exact host wins over a wildcard, and the longest wildcard wins among wildcards.
 

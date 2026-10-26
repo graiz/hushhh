@@ -95,19 +95,20 @@ struct FocusContext {
         var justEnabled = false
         if let targetPID {
             root = AXUIElementCreateApplication(targetPID)
-            // Only when dictation starts, never in the background: switching this on costs
-            // Chromium apps some CPU and memory.
+            // Only when dictation first starts in the app, never in the background: switching
+            // this on costs the app some CPU and memory. It then stays on (see `switchedOn`).
             justEnabled = enableAccessibility(pid: targetPID)
         } else {
             root = AXUIElementCreateSystemWide()
         }
+        lastCaptureJustEnabled = justEnabled
         AXUIElementSetMessagingTimeout(root, 0.25)
 
         var focused: AXUIElement? = copyElement(root, kAXFocusedUIElementAttribute)
-        if focused == nil, let targetPID,
-           justEnabled || (appKind(pid: targetPID) == .electron && waitedForTree.insert(targetPID).inserted) {
-            // Chromium and Electron build their accessibility tree just after being asked;
-            // give it one moment. Electron keeps its tree once built, so wait once per app.
+        if focused == nil, let targetPID, justEnabled, appKind(pid: targetPID) != .electron {
+            // Chromium browsers build their accessibility tree just after being asked; give
+            // it one moment. Electron apps take about 2 s, far too long to block for, so
+            // DictationController captures again a little later instead.
             usleep(150_000)
             focused = copyElement(root, kAXFocusedUIElementAttribute)
         }
@@ -470,11 +471,15 @@ struct FocusContext {
         return rect
     }
 
-    /// Electron apps already given a moment to build their accessibility tree in this run of Hushhh.
-    private static var waitedForTree: Set<pid_t> = []
+    /// True when the latest `capture` switched an app's accessibility on, so its tree
+    /// may still be building and a capture shortly after can find more.
+    private(set) static var lastCaptureJustEnabled = false
 
-    /// The attributes Hushhh itself switched on, per app, for the current dictation session.
-    /// Only these are switched off again; one that was already on belongs to someone else.
+    /// The attributes Hushhh itself switched on, per app. They stay on until Hushhh quits
+    /// (or the app does): an Electron app takes about 2 s to build its tree, so switching
+    /// it on for each session would leave every dictation without a caret for 2 s. An app
+    /// listed here, even with nothing switched on, isn't asked again. Only these are
+    /// switched off again; one that was already on belongs to someone else.
     private static var switchedOn: [pid_t: [String]] = [:]
 
     private static func isOn(_ app: AXUIElement, _ name: String) -> Bool {
@@ -488,11 +493,13 @@ struct FocusContext {
         return AppKind.of(bundleURL: running?.bundleURL, bundleID: running?.bundleIdentifier)
     }
 
-    /// Chromium browsers only report text positions once AXEnhancedUserInterface is on, so
-    /// Hushhh switches that on for the session. It never sets AXManualAccessibility: it
-    /// makes VS Code switch into its screen-reader mode, and Electron reads it back as
+    /// Chromium browsers only report text positions, and Electron apps only report their
+    /// focused text box, once AXEnhancedUserInterface is on, so Hushhh switches that on at
+    /// the first dictation in the app and leaves it on (see `switchedOn`). Code editors are
+    /// left alone (see `AppKind.shouldManageEnhancedUI`). It never sets AXManualAccessibility:
+    /// it makes VS Code switch into its screen-reader mode, and Electron reads it back as
     /// false, so Hushhh couldn't tell whether another assistive app had set it and would
-    /// switch that app's setting off on release. Electron builds its tree when queried.
+    /// switch that app's setting off on release.
     /// Returns true if this call switched an attribute on.
     @discardableResult
     static func enableAccessibility(pid: pid_t) -> Bool {
@@ -501,7 +508,9 @@ struct FocusContext {
         AXUIElementSetMessagingTimeout(app, 0.25)
         let running = NSRunningApplication(processIdentifier: pid)
         let forced = AppOverridesStore.current(bundleID: running?.bundleIdentifier, host: nil).enhancedUserInterface
-        let names = (forced ?? (appKind(pid: pid) == .chromium)) ? ["AXEnhancedUserInterface"] : []
+        let manage = AppKind.shouldManageEnhancedUI(kind: appKind(pid: pid), bundleID: running?.bundleIdentifier,
+                                                    override: forced)
+        let names = manage ? ["AXEnhancedUserInterface"] : []
         var set: [String] = []
         for name in names where !isOn(app, name) {
             // Chromium applies the change yet reports cannotComplete, so check the value too.
@@ -512,12 +521,13 @@ struct FocusContext {
         return !set.isEmpty
     }
 
-    /// Switches off the accessibility attributes Hushhh switched on this session, so apps
-    /// stop paying for an accessibility tree nobody is reading. Attributes that were
-    /// already on (another assistive app's) are left alone: switching them off would
-    /// break that app.
+    /// Switches off the accessibility attributes Hushhh switched on, so apps stop paying for
+    /// an accessibility tree nobody is reading. Called only when Hushhh quits (and when a
+    /// diagnostic run ends). Attributes that were already on (another assistive app's) are
+    /// left alone: switching them off would break that app.
     static func releaseAccessibility() {
-        for (pid, attributes) in switchedOn {
+        // Apps that have quit since took their setting with them.
+        for (pid, attributes) in switchedOn where NSRunningApplication(processIdentifier: pid) != nil {
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(app, 0.25)
             for name in attributes { AXUIElementSetAttributeValue(app, name as CFString, kCFBooleanFalse) }
