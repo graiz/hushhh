@@ -580,7 +580,8 @@ struct FocusContext {
 
     /// Finds a terminal's cursor from its screen text (Ghostty). The grid's size comes from
     /// the window, padding and font size (see `TerminalGrid`); the text says how many grid
-    /// rows each line takes and that the cursor is at the end of the last prompt line.
+    /// rows each line takes and where the cursor is: in a prompt box an app draws (see
+    /// `TerminalPrompt`), or else at the end of the last prompt line.
     private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?)
         -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, lineStartX: CGFloat, rightEdgeX: CGFloat,
             textOffsetY: CGFloat, preceding: Character?)? {
@@ -593,16 +594,29 @@ struct FocusContext {
         var rows = ns.substring(from: start).components(separatedBy: "\n")
         if rows.count > 1, rows.last?.isEmpty == true { rows.removeLast() }
 
-        var lines = rows
-        // Blank rows below the prompt aren't where the cursor is.
-        while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
-        // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
-        guard let line = lines.last else { return nil }
-        let content = String(TerminalGrid.trimmingTrailingSpaces(line))
-        guard !content.isEmpty else { return nil }
-        // Full-screen apps (Claude Code, vim, tmux) end the screen with a bordered status
-        // line, not a prompt; there the cursor could be anywhere.
-        guard !["│", "┃", "║", "────"].contains(where: { content.contains($0) }) else { return nil }
+        // Where the cursor is: in a prompt box an app draws (Claude Code, Codex), possibly
+        // beside a sidebar or other panes; otherwise at the end of the last prompt line.
+        let cursorLine: Int, column: Int, preceding: Character?
+        if let prompt = TerminalPrompt.locate(rows: rows) {
+            (cursorLine, column, preceding) = (prompt.row, prompt.column, prompt.preceding)
+        } else {
+            var lines = rows
+            // Blank rows below the prompt aren't where the cursor is.
+            while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+            // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
+            guard let line = lines.last else { return nil }
+            let content = String(TerminalGrid.trimmingTrailingSpaces(line))
+            guard !content.isEmpty else { return nil }
+            // Full-screen apps (vim, tmux) end the screen with a bordered status line, not
+            // a prompt; there the cursor could be anywhere.
+            guard !["│", "┃", "║", "────"].contains(where: { content.contains($0) }) else { return nil }
+            // Trailing spaces are padding, except a prompt usually ends with one space
+            // before the cursor.
+            let promptSpace = line.count > content.count ? 1 : 0
+            cursorLine = lines.count - 1
+            column = TerminalPrompt.displayWidth(content) + promptSpace
+            preceding = promptSpace == 1 ? " " : content.last
+        }
 
         let config = bundleID == "com.mitchellh.ghostty" ? ghosttyConfig() : [:]
         let padding = TerminalGrid.padding(x: config["window-padding-x"], y: config["window-padding-y"])
@@ -617,21 +631,16 @@ struct FocusContext {
                                   lineHeight: $0.ascender - $0.descender + $0.leading, scale: pixelScale)
         } ?? TerminalGrid.cellSize(fontSize: size, scale: pixelScale)
 
-        // Trailing spaces are padding, except a prompt usually ends with one space
-        // before the cursor.
-        let promptSpace = line.count > content.count ? 1 : 0
-        let column = displayWidth(content) + promptSpace
-        let widths = rows.map { displayWidth(String(TerminalGrid.trimmingTrailingSpaces($0))) }
+        let widths = rows.map { TerminalPrompt.displayWidth(TerminalGrid.trimmingTrailingSpaces($0)) }
         guard let placement = TerminalGrid.cursor(frame: frame, padding: padding, balanced: TerminalGrid.flag(config["window-padding-balance"]),
                                              cell: cellSize, scale: pixelScale, lineWidths: widths,
-                                             cursorLine: lines.count - 1, cursorColumn: column) else { return nil }
+                                             cursorLine: cursorLine, cursorColumn: column) else { return nil }
         let cell = placement.cell
         let jetBrains = configured == nil ? NSFont(name: "JetBrainsMono-Regular", size: cell.width / 0.6) : nil
         let font = configured ?? jetBrains ?? monospacedFont(cellWidth: cell.width)
         // The substitute for JetBrains Mono sits about 1 pt lower in the cell (measured):
         // lift the ghost text, not the caret.
         let textOffsetY: CGFloat = configured == nil && jetBrains == nil ? 1 : 0
-        let preceding: Character? = promptSpace == 1 ? " " : content.last
         return (CGRect(x: cell.minX, y: cell.minY, width: 1, height: cell.height), font, cell.width,
                 placement.gridMinX, placement.gridMaxX, textOffsetY, preceding)
     }
@@ -797,10 +806,6 @@ struct FocusContext {
     }
 
     /// Terminal columns a string occupies (wide emoji take two).
-    private static func displayWidth(_ text: String) -> Int {
-        text.reduce(0) { $0 + ($1.unicodeScalars.first?.properties.isEmojiPresentation == true ? 2 : 1) }
-    }
-
     /// Ghostty's config, read once per session.
     private static var ghosttyCache: [String: String]?
 
