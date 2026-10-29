@@ -216,7 +216,7 @@ final class OverlayController {
         let cursorSkip: CGFloat = 0
         var indent = caret.minX + cursorSkip - style.lineStartX
         var lineHeight = Self.lineMetrics.defaultLineHeight(for: font)
-        var firstLineTop = style.alignsToTop ? caret.maxY : caret.midY + lineHeight / 2
+        var firstLineTop = (style.alignsToTop ? caret.maxY : caret.midY + lineHeight / 2) + style.textOffsetY
         if style.singleLine {
             // One line from the caret rightwards, overflowing the field like a cell does.
             lineStartX = caret.minX + cursorSkip

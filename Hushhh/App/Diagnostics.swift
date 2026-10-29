@@ -245,7 +245,15 @@ enum Diagnostics {
         var split = Int(arg("--split") ?? "") ?? 0
         let phase = arg("--phase") ?? "prepare"
         let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
-        let chosen = arg("--pid").flatMap(pid_t.init).map { pid in instances.first { $0.processIdentifier == pid } } ?? instances.first
+        var chosen = instances.first
+        if args.contains("--pid") {
+            let text = arg("--pid") ?? ""
+            guard let pid = pid_t(text) else { print("error: --pid \(text) isn't a process ID"); exit(1) }
+            guard let match = instances.first(where: { $0.processIdentifier == pid }) else {
+                print("error: no \(bundle) with pid \(pid)"); exit(1)
+            }
+            chosen = match
+        }
         guard let app = chosen else {
             print("error: \(bundle) isn't running"); exit(1)
         }

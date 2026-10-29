@@ -57,6 +57,9 @@ struct FocusContext {
         /// Native text views put extra line spacing below the text, so ghost text aligns
         /// to the top of the caret. Web pages (CSS) and terminals centre it in the line.
         var alignsToTop = false
+        /// Moves the ghost text up (positive) or down from where the caret puts it, when
+        /// the font drawn sits differently in the line than the app's own font.
+        var textOffsetY: CGFloat = 0
         /// The field's own background colour, when the app reports it.
         var background: NSColor?
 
@@ -71,6 +74,7 @@ struct FocusContext {
             copy.replacing = replacing?.offsetBy(dx: dx, dy: dy)
             copy.bounds = bounds
             copy.alignsToTop = alignsToTop
+            copy.textOffsetY = textOffsetY
             copy.background = background
             return copy
         }
@@ -255,9 +259,9 @@ struct FocusContext {
             preceding = grid.preceding
             following = nil
             var style = InlineStyle(caret: grid.caret, font: grid.font, color: nil,
-                                    lineStartX: frame.minX + grid.padding, rightEdgeX: frame.maxX - grid.padding,
-                                    singleLine: false)
+                                    lineStartX: grid.lineStartX, rightEdgeX: grid.rightEdgeX, singleLine: false)
             style.cursorWidth = grid.cellWidth
+            style.textOffsetY = grid.textOffsetY
             fallbackInline = style
         }
 
@@ -578,7 +582,8 @@ struct FocusContext {
     /// the window, padding and font size (see `TerminalGrid`); the text says how many grid
     /// rows each line takes and that the cursor is at the end of the last prompt line.
     private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?)
-        -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, padding: CGFloat, preceding: Character?)? {
+        -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, lineStartX: CGFloat, rightEdgeX: CGFloat,
+            textOffsetY: CGFloat, preceding: Character?)? {
         let ns = value as NSString
         var start = 0
         if let visible = axValue(element, "AXVisibleCharacterRange") {
@@ -593,34 +598,42 @@ struct FocusContext {
         while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
         // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
         guard let line = lines.last else { return nil }
-        let content = line.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        let content = String(TerminalGrid.trimmingTrailingSpaces(line))
         guard !content.isEmpty else { return nil }
         // Full-screen apps (Claude Code, vim, tmux) end the screen with a bordered status
         // line, not a prompt; there the cursor could be anywhere.
         guard !["│", "┃", "║", "────"].contains(where: { content.contains($0) }) else { return nil }
 
         let config = bundleID == "com.mitchellh.ghostty" ? ghosttyConfig() : [:]
-        let paddingX = config["window-padding-x"].flatMap(Double.init).map { CGFloat($0) } ?? 4
-        let paddingY = config["window-padding-y"].flatMap(Double.init).map { CGFloat($0) } ?? paddingX
+        let padding = TerminalGrid.padding(x: config["window-padding-x"], y: config["window-padding-y"])
         let size = config["font-size"].flatMap(Double.init).map { CGFloat($0) } ?? 13
         let pixelScale = NSScreen.screens.first { $0.frame.intersects(frame) }?.backingScaleFactor ?? 2
+
+        // The cell comes from the configured font when there is one, otherwise from
+        // Ghostty's built-in JetBrains Mono.
+        let configured = config["font-family"].flatMap { NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: size) }
+        let cellSize = configured.map {
+            TerminalGrid.cellSize(advance: ("M" as NSString).size(withAttributes: [.font: $0]).width,
+                                  lineHeight: $0.ascender - $0.descender + $0.leading, scale: pixelScale)
+        } ?? TerminalGrid.cellSize(fontSize: size, scale: pixelScale)
 
         // Trailing spaces are padding, except a prompt usually ends with one space
         // before the cursor.
         let promptSpace = line.count > content.count ? 1 : 0
         let column = displayWidth(content) + promptSpace
-        let widths = rows.map { displayWidth($0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)) }
-        guard var cell = TerminalGrid.cursor(frame: frame, padding: CGSize(width: paddingX, height: paddingY),
-                                             fontSize: size, scale: pixelScale, lineWidths: widths,
+        let widths = rows.map { displayWidth(String(TerminalGrid.trimmingTrailingSpaces($0))) }
+        guard let placement = TerminalGrid.cursor(frame: frame, padding: padding, balanced: TerminalGrid.flag(config["window-padding-balance"]),
+                                             cell: cellSize, scale: pixelScale, lineWidths: widths,
                                              cursorLine: lines.count - 1, cursorColumn: column) else { return nil }
-        let cellWidth = cell.width
-        let font = config["font-family"].flatMap { NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: cellWidth / 0.6) }
-            ?? NSFont(name: "JetBrainsMono-Regular", size: cellWidth / 0.6)
-            ?? monospacedFont(cellWidth: cellWidth)
-        // The substitute font sits about 1 pt lower in the cell than JetBrains Mono (measured).
-        if config["font-family"] == nil { cell.origin.y += 1 }
+        let cell = placement.cell
+        let jetBrains = configured == nil ? NSFont(name: "JetBrainsMono-Regular", size: cell.width / 0.6) : nil
+        let font = configured ?? jetBrains ?? monospacedFont(cellWidth: cell.width)
+        // The substitute for JetBrains Mono sits about 1 pt lower in the cell (measured):
+        // lift the ghost text, not the caret.
+        let textOffsetY: CGFloat = configured == nil && jetBrains == nil ? 1 : 0
         let preceding: Character? = promptSpace == 1 ? " " : content.last
-        return (CGRect(x: cell.minX, y: cell.minY, width: 1, height: cell.height), font, cellWidth, paddingX, preceding)
+        return (CGRect(x: cell.minX, y: cell.minY, width: 1, height: cell.height), font, cell.width,
+                placement.gridMinX, placement.gridMaxX, textOffsetY, preceding)
     }
 
     /// Moves a code editor's hidden-input caret right by its column's worth of cells.
