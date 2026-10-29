@@ -574,9 +574,9 @@ struct FocusContext {
 
     // MARK: AX helpers
 
-    /// Finds a terminal's cursor from its visible screen text. Ghostty reports every
-    /// screen row padded with spaces to the terminal's width, which also gives us the
-    /// grid size: columns = row length, rows = row count.
+    /// Finds a terminal's cursor from its screen text (Ghostty). The grid's size comes from
+    /// the window, padding and font size (see `TerminalGrid`); the text says how many grid
+    /// rows each line takes and that the cursor is at the end of the last prompt line.
     private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?)
         -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, padding: CGFloat, preceding: Character?)? {
         let ns = value as NSString
@@ -587,14 +587,12 @@ struct FocusContext {
         }
         var rows = ns.substring(from: start).components(separatedBy: "\n")
         if rows.count > 1, rows.last?.isEmpty == true { rows.removeLast() }
-        let totalRows = rows.count
-        let columns = rows.map(displayWidth).max() ?? 0
 
         var lines = rows
         // Blank rows below the prompt aren't where the cursor is.
         while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
         // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
-        guard let line = lines.last, totalRows > 0, columns > 0 else { return nil }
+        guard let line = lines.last else { return nil }
         let content = line.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
         guard !content.isEmpty else { return nil }
         // Full-screen apps (Claude Code, vim, tmux) end the screen with a bordered status
@@ -604,41 +602,25 @@ struct FocusContext {
         let config = bundleID == "com.mitchellh.ghostty" ? ghosttyConfig() : [:]
         let paddingX = config["window-padding-x"].flatMap(Double.init).map { CGFloat($0) } ?? 4
         let paddingY = config["window-padding-y"].flatMap(Double.init).map { CGFloat($0) } ?? paddingX
-
-        // The grid fills the window minus padding, with less than one cell left over.
-        let innerWidth = frame.width - 2 * paddingX
-        let innerHeight = frame.height - 2 * paddingY
         let size = config["font-size"].flatMap(Double.init).map { CGFloat($0) } ?? 13
-        // Ghostty's cell is 0.6 em wide and 1.32 em tall (JetBrains Mono), snapped to
-        // whole device pixels.
         let pixelScale = NSScreen.screens.first { $0.frame.intersects(frame) }?.backingScaleFactor ?? 2
-        let metricWidth = (size * 0.6 * pixelScale).rounded() / pixelScale
-        let metricHeight = (size * 1.32 * pixelScale).rounded(.down) / pixelScale
-        // Rows padded to the full width tell us the column count; trust the font metric
-        // when it agrees, otherwise divide the window by the columns.
-        let cellWidth = abs(Int(innerWidth / metricWidth) - columns) <= 2 ? metricWidth : innerWidth / (CGFloat(columns) + 0.5)
-        // Ghostty only reports rows up to the cursor, so the row count says nothing about
-        // the screen's height unless it fills it.
-        let fillsScreen = abs(Int(innerHeight / metricHeight) - totalRows) <= 1
-        let cellHeight = fillsScreen || CGFloat(totalRows) * metricHeight <= innerHeight
-            ? metricHeight : innerHeight / (CGFloat(totalRows) + 0.5)
-        let font = config["font-family"].flatMap { NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: cellWidth / 0.6) }
-            ?? NSFont(name: "JetBrainsMono-Regular", size: cellWidth / 0.6)
-            ?? monospacedFont(cellWidth: cellWidth)
 
         // Trailing spaces are padding, except a prompt usually ends with one space
         // before the cursor.
         let promptSpace = line.count > content.count ? 1 : 0
         let column = displayWidth(content) + promptSpace
-        let row = lines.count - 1
-
-        let x = frame.minX + paddingX + CGFloat(column) * cellWidth
+        let widths = rows.map { displayWidth($0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)) }
+        guard var cell = TerminalGrid.cursor(frame: frame, padding: CGSize(width: paddingX, height: paddingY),
+                                             fontSize: size, scale: pixelScale, lineWidths: widths,
+                                             cursorLine: lines.count - 1, cursorColumn: column) else { return nil }
+        let cellWidth = cell.width
+        let font = config["font-family"].flatMap { NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: cellWidth / 0.6) }
+            ?? NSFont(name: "JetBrainsMono-Regular", size: cellWidth / 0.6)
+            ?? monospacedFont(cellWidth: cellWidth)
         // The substitute font sits about 1 pt lower in the cell than JetBrains Mono (measured).
-        let baselineNudge: CGFloat = config["font-family"] == nil ? 1 : 0
-        let top = frame.maxY - paddingY - CGFloat(row) * cellHeight + baselineNudge
-        guard x <= frame.maxX, top - cellHeight >= frame.minY else { return nil }
+        if config["font-family"] == nil { cell.origin.y += 1 }
         let preceding: Character? = promptSpace == 1 ? " " : content.last
-        return (CGRect(x: x, y: top - cellHeight, width: 1, height: cellHeight), font, cellWidth, paddingX, preceding)
+        return (CGRect(x: cell.minX, y: cell.minY, width: 1, height: cell.height), font, cellWidth, paddingX, preceding)
     }
 
     /// Moves a code editor's hidden-input caret right by its column's worth of cells.

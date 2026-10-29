@@ -37,7 +37,7 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
   2. Text markers, WebKit's and Chromium's position API for rich web editors.
   3. A web editor's own caret element (Google Docs).
   4. A web code editor's hidden input, which it moves to the caret (VS Code, CodeMirror, Ace). For VS Code-family editors the column comes from the status bar, so they are never switched into screen-reader mode, and ghost text is drawn inline at that column. Other hidden-input editors show the bubble, since Hushhh can't tell where on the line their caret is.
-  5. The terminal grid (Ghostty).
+  5. The terminal grid (Ghostty): cell size from the font size, grid size from the window and padding, and the cursor's row from the screen text, counting soft-wrapped lines as several rows and leaving out rows scrolled off the top.
   6. Laying the field's text out itself at the field's real width (Superhuman, Edge's address bar).
   7. A bubble below the line or by the pointer (Google Slides, full-screen terminal apps).
 - **Electron and Chromium apps.** Electron apps (Claude, Slack, Notion, Superhuman) only expose their focused text box, and Chromium browsers only report text positions, once `AXEnhancedUserInterface` is on. Hushhh switches it on at the first dictation in such an app and leaves it on until the app or Hushhh quits: an Electron app takes about 2 s to build its tree, so switching it on for each dictation would leave every one without a caret for that long. The first dictation doesn't wait; it shows the bubble and looks for the caret again 0.8 s, 1.6 s, 2.5 s and 3.5 s after the tree was switched on (a dictation started while the tree is still building gets the looks still ahead), moving the ghost text there once found. VS Code-family editors are excluded (it would switch them into screen-reader mode). Hushhh never sets `AXManualAccessibility`, and only switches off what it switched on itself, never another app's setting. If Hushhh is killed or crashes rather than quitting, the setting stays on until that app quits.
@@ -88,11 +88,11 @@ Alignment is checked by drawing red ghost text at an app's cursor, typing the sa
 | --- | --- | --- |
 | TextEdit | Accessibility positions | 0 / 0 / 0 |
 | Notes | Accessibility positions | ≤0.5 |
-| Terminal | Accessibility positions, cell-sized monospaced font | 0 / 0.5 / 0 |
+| Terminal | Accessibility positions, cell-sized monospaced font | 0 / 0 / 0 (cursor block, 4 cases) |
 | Excel | Cell frame + text measured in the cell's font (Aptos Narrow) | 0 / 0 / 0 |
 | Chrome text box | Accessibility positions + font identified from character positions | 0.5 / 0.5 / 0.5 |
 | Google Docs | Docs' `kix-cursor-caret` element, Arial | 0.5 / 0 / 0.5 |
-| Ghostty | Terminal grid from screen text + config | 0.5 / 0 / 0 |
+| Ghostty | Terminal grid from window size, padding and font size; screen text gives the row (soft wraps, scrollback) | 0 / 1 / 1 (cursor block, 8 cases; caret 1 pt high for the substitute font's baseline) |
 | Messages (compose) | Accessibility positions | 0.5 / 1 / 1 |
 | WhatsApp (message box, search) | Accessibility positions | 0 / 0 / 0 |
 | Edge address bar | Text laid out in the field, 7 pt inset | 0.5 / 1 / 0.5 |

@@ -230,7 +230,8 @@ enum Diagnostics {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { FocusContext.releaseAccessibility(); exit(0) }
     }
 
-    /// `Hushhh --align-test --bundle <id> --split <n> --phase prepare|draw [--markers]`
+    /// `Hushhh --align-test --bundle <id> [--pid <pid>] --split <n> --phase prepare|draw [--markers]`
+    /// --pid: the app instance to test when several are running (default: the first).
     /// --markers: skip index lookups and use text markers.
     /// prepare: puts the caret at character n of the focused field and prints where
     ///          Hushhh thinks it is (top-left screen points) plus the rest of the line.
@@ -243,7 +244,9 @@ enum Diagnostics {
         let bundle = arg("--bundle") ?? "com.apple.TextEdit"
         var split = Int(arg("--split") ?? "") ?? 0
         let phase = arg("--phase") ?? "prepare"
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first else {
+        let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        let chosen = arg("--pid").flatMap(pid_t.init).map { pid in instances.first { $0.processIdentifier == pid } } ?? instances.first
+        guard let app = chosen else {
             print("error: \(bundle) isn't running"); exit(1)
         }
         let pid = app.processIdentifier
