@@ -10,7 +10,7 @@ enum TmuxClients {
     /// The `list-clients` fields, in order. The pane fields are each client's active pane.
     static let fields = ["client_tty", "client_width", "client_height", "client_activity", "client_termname",
                          "pane_left", "pane_top", "pane_width", "pane_height", "cursor_x", "cursor_y",
-                         "pane_in_mode", "status", "status-position", "client_pid"]
+                         "pane_in_mode", "status", "status-position", "client_pid", "cursor_flag"]
 
     /// The `-F` format: the fields separated by tabs, which none of the values contain.
     static var format: String { fields.map { "#{\($0)}" }.joined(separator: "\t") }
@@ -23,6 +23,8 @@ enum TmuxClients {
         var cursorX: Int, cursorY: Int
         /// The pane is in copy or another mode, so the cursor isn't where input goes.
         var inMode: Bool
+        /// The app in the pane has hidden the cursor (a full-screen app that draws its own).
+        var cursorHidden: Bool
         /// Rows the status line takes: `off` is none, `on` one, `2`…`5` that many.
         var statusLines: Int
         var statusAtTop: Bool
@@ -47,7 +49,7 @@ enum TmuxClients {
             }
             return Client(tty: parts[0], width: n[0], height: n[1], activity: n[2],
                           paneLeft: n[3], paneTop: n[4], paneWidth: n[5], paneHeight: n[6],
-                          cursorX: n[7], cursorY: n[8], inMode: parts[11] == "1",
+                          cursorX: n[7], cursorY: n[8], inMode: parts[11] == "1", cursorHidden: parts[15] == "0",
                           statusLines: status, statusAtTop: parts[13] == "top", pid: pid)
         }
     }
@@ -60,20 +62,31 @@ enum TmuxClients {
         clients.filter { $0.width == columns && $0.height == rows && isInApp($0.pid) }.max { $0.activity < $1.activity }
     }
 
-    /// The cursor's screen row and column on the terminal grid; nil while the pane is in
-    /// copy mode, or if the cell falls outside the client.
-    static func cell(_ client: Client) -> (row: Int, column: Int)? {
-        guard !client.inMode else { return nil }
+    /// The cursor's screen row and column on the terminal grid, and its column within the
+    /// pane; nil while the pane is in copy mode or the cursor is hidden (then the screen
+    /// text says where input goes), or if the cell falls outside the client.
+    static func cell(_ client: Client) -> (row: Int, column: Int, paneColumn: Int)? {
+        guard !client.inMode, !client.cursorHidden else { return nil }
         let row = client.paneTop + client.cursorY + (client.statusAtTop ? client.statusLines : 0)
         let column = client.paneLeft + client.cursorX
         guard (0..<client.height).contains(row), (0..<client.width).contains(column) else { return nil }
-        return (row, column)
+        return (row, column, client.cursorX)
     }
 
     /// The cursor cell for a terminal grid of `columns` × `rows`, from `list-clients` output.
     static func cursor(output: String, columns: Int, rows: Int,
-                       isInApp: (Int32) -> Bool = { _ in true }) -> (row: Int, column: Int)? {
+                       isInApp: (Int32) -> Bool = { _ in true }) -> (row: Int, column: Int, paneColumn: Int)? {
         choose(parse(output), columns: columns, rows: rows, isInApp: isInApp).flatMap(cell)
+    }
+
+    /// The character before the cursor on its screen row: a space at the pane's first
+    /// column, after a pane border, or past the row's text.
+    static func preceding(row: String, column: Int, paneColumn: Int) -> Character {
+        guard paneColumn > 0, column > 0,
+              let before = TerminalPrompt.cells(row).last(where: { $0.column < column }),
+              before.column + before.width >= column,
+              !TerminalPrompt.borders.contains(before.character) else { return " " }
+        return before.character
     }
 
     /// The default server's socket: `$TMUX_TMPDIR` (or `/tmp`), then `tmux-<uid>/default`.

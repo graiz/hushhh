@@ -2,9 +2,10 @@ import XCTest
 
 /// Fixtures are real tmux 3.6a output for a 120×40 window split into two side-by-side
 /// panes (left 60 columns, right 59 at column 61), with a client attached at 120×41
-/// (40 pane rows plus the status line). Each line ends with the client's pid.
+/// (40 pane rows plus the status line). Each line ends with the client's pid and
+/// `cursor_flag` (1 shown, 0 after the app sends `ESC [?25l`, as measured).
 final class TmuxClientsTests: XCTestCase {
-    private func line(_ fields: String...) -> String { (fields + ["4242"]).joined(separator: "\t") }
+    private func line(_ fields: String...) -> String { (fields + ["4242", "1"]).joined(separator: "\t") }
 
     /// The right pane active, status at the bottom.
     private lazy var rightPane = line("/dev/ttys037", "120", "41", "1793331819", "xterm-256color",
@@ -25,6 +26,7 @@ final class TmuxClientsTests: XCTestCase {
         XCTAssertEqual(client.statusLines, 1)
         XCTAssertFalse(client.statusAtTop)
         XCTAssertEqual(client.pid, 4242)
+        XCTAssertFalse(client.cursorHidden)
     }
 
     func testSkipsMalformedLines() {
@@ -94,6 +96,24 @@ final class TmuxClientsTests: XCTestCase {
         XCTAssertNil(TmuxClients.cursor(output: copy, columns: 120, rows: 41))
     }
 
+    func testHiddenCursorGivesNoCursor() {
+        let hidden = rightPane.replacingOccurrences(of: "\t4242\t1", with: "\t4242\t0")
+        XCTAssertTrue(TmuxClients.parse(hidden).first?.cursorHidden == true)
+        XCTAssertNil(TmuxClients.cursor(output: hidden, columns: 120, rows: 41))
+    }
+
+    func testPrecedingCharacter() {
+        let row = "left pane text│$ ls"
+        // After "$ ls" in the right pane (pane starts at column 15).
+        XCTAssertEqual(TmuxClients.preceding(row: row, column: 19, paneColumn: 4), "s")
+        // Right after the border, at the pane's first column.
+        XCTAssertEqual(TmuxClients.preceding(row: row, column: 15, paneColumn: 0), " ")
+        // A border just before the cursor.
+        XCTAssertEqual(TmuxClients.preceding(row: row, column: 15, paneColumn: 3), " ")
+        // Past the row's text.
+        XCTAssertEqual(TmuxClients.preceding(row: row, column: 25, paneColumn: 10), " ")
+    }
+
     func testNoSizeMatchGivesNoCursor() {
         XCTAssertNil(TmuxClients.cursor(output: rightPane, columns: 119, rows: 41))
         XCTAssertNil(TmuxClients.cursor(output: rightPane, columns: 120, rows: 40))
@@ -101,7 +121,7 @@ final class TmuxClientsTests: XCTestCase {
     }
 
     func testFormatUsesTabs() {
-        XCTAssertEqual(TmuxClients.format.split(separator: "\t").count, 15)
+        XCTAssertEqual(TmuxClients.format.split(separator: "\t").count, 16)
         XCTAssertTrue(TmuxClients.format.hasPrefix("#{client_tty}\t"))
     }
 

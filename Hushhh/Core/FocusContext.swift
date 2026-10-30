@@ -623,10 +623,9 @@ struct FocusContext {
             placement = found
             // The screen text is exactly the grid's rows here; the character before the
             // cursor is whatever occupies the previous cell.
-            let before = rows.indices.contains(tmux.row) && tmux.column > 0
-                ? TerminalPrompt.cells(rows[tmux.row]).last { $0.column < tmux.column }
-                : nil
-            preceding = before.map { $0.column + $0.width >= tmux.column ? $0.character : " " } ?? " "
+            preceding = rows.indices.contains(tmux.row)
+                ? TmuxClients.preceding(row: rows[tmux.row], column: tmux.column, paneColumn: tmux.paneColumn)
+                : " "
         } else {
             // Otherwise: in a prompt box an app draws (Claude Code, Codex), possibly beside
             // a sidebar or other panes; or else at the end of the last prompt line.

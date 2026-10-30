@@ -4,10 +4,12 @@ import Foundation
 ///
 /// Asked at most once per dictation session, and only when a terminal shows no caret of
 /// its own: a single `stat` of the server socket first, so no process starts when tmux
-/// isn't running, then `tmux list-clients` with a 300 ms limit.
+/// isn't running, then `tmux list-clients`, answered or abandoned within 300 ms.
 enum TmuxQuery {
     private static let candidates = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
     private static let timeout: TimeInterval = 0.3
+    /// How long a stopped tmux gets to exit before it's killed.
+    private static let killGrace: TimeInterval = 0.02
 
     /// This session's `list-clients` output; `.some(nil)` once asked and unavailable.
     private static var cache: String??
@@ -54,16 +56,20 @@ enum TmuxQuery {
         process.standardInput = FileHandle.nullDevice
         let done = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in done.signal() }
+        // Everything, including reading the answer, finishes within `timeout`.
+        let deadline = DispatchTime.now() + timeout
         do { try process.run() } catch { return nil }
         // Read while it runs so a long answer can't fill the pipe and stall it.
         var data = Data()
         let reader = DispatchWorkItem { data = out.fileHandleForReading.readDataToEndOfFile() }
         DispatchQueue.global(qos: .userInitiated).async(execute: reader)
-        guard done.wait(timeout: .now() + timeout) == .success else {
+        guard done.wait(timeout: deadline - killGrace) == .success else {
+            // Too slow: stop it, and kill it if it ignores that.
             process.terminate()
+            if done.wait(timeout: .now() + killGrace) == .timedOut { kill(process.processIdentifier, SIGKILL) }
             return nil
         }
-        guard reader.wait(timeout: .now() + 0.05) == .success, process.terminationStatus == 0 else { return nil }
+        guard reader.wait(timeout: deadline) == .success, process.terminationStatus == 0 else { return nil }
         return String(data: data, encoding: .utf8)
     }
 }
