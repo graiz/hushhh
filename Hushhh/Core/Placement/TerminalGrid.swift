@@ -74,6 +74,17 @@ enum TerminalGrid {
         var gridMaxX: CGFloat
     }
 
+    /// The grid's size in whole cells: columns and visible rows.
+    static func size(frame: CGRect, padding: Padding, cell: CGSize, scale: CGFloat) -> (columns: Int, rows: Int)? {
+        func px(_ points: CGFloat) -> CGFloat { (points * scale).rounded(.down) }
+        let cellW = (cell.width * scale).rounded(), cellH = (cell.height * scale).rounded()
+        guard cellW > 0, cellH > 0 else { return nil }
+        let columns = Int(max(0, px(frame.width) - px(padding.left) - px(padding.right)) / cellW)
+        let rows = Int(max(0, px(frame.height) - px(padding.top) - px(padding.bottom)) / cellH)
+        guard columns > 0, rows > 0 else { return nil }
+        return (columns, rows)
+    }
+
     /// Where the cursor's cell is.
     /// - Parameters:
     ///   - frame: the terminal view's frame.
@@ -87,23 +98,9 @@ enum TerminalGrid {
     /// - Returns: nil when the cursor would fall outside the visible grid.
     static func cursor(frame: CGRect, padding: Padding, balanced: Bool = false, cell: CGSize, scale: CGFloat,
                        lineWidths: [Int], cursorLine: Int, cursorColumn: Int) -> Placement? {
-        func px(_ points: CGFloat) -> CGFloat { (points * scale).rounded(.down) }
-        let cellW = (cell.width * scale).rounded(), cellH = (cell.height * scale).rounded()
-        let width = px(frame.width), height = px(frame.height)
-        guard cellW > 0, cellH > 0 else { return nil }
-        let columns = Int(max(0, width - px(padding.left) - px(padding.right)) / cellW)
-        let visibleRows = Int(max(0, height - px(padding.top) - px(padding.bottom)) / cellH)
-        guard columns > 0, visibleRows > 0, lineWidths.indices.contains(cursorLine), cursorColumn >= 0 else { return nil }
-
-        var left = px(padding.left), top = px(padding.top)
-        if balanced {
-            // Left and right get half the spare width each. The top gets half the spare
-            // height, but at most the average side padding plus half a cell; the bottom
-            // takes the rest.
-            left = ((width - CGFloat(columns) * cellW) / 2).rounded(.down)
-            let topLimit = ((px(padding.left) + px(padding.right) + cellW) / 2).rounded(.down)
-            top = min(topLimit, ((height - CGFloat(visibleRows) * cellH) / 2).rounded(.down))
-        }
+        guard let grid = size(frame: frame, padding: padding, cell: cell, scale: scale),
+              lineWidths.indices.contains(cursorLine), cursorColumn >= 0 else { return nil }
+        let columns = grid.columns
 
         // A cursor just past the last column waits there (pending wrap) until the next
         // character arrives, so it stays on the last column of its row.
@@ -114,14 +111,35 @@ enum TerminalGrid {
         let rowsPerLine = lineWidths.map { gridRows(width: $0, columns: columns) }
         let cursorRow = rowsPerLine[..<cursorLine].reduce(0, +) + rowInLine
         // Rows past the bottom of the window have scrolled the top ones out of view.
-        let scrolledOff = max(0, rowsPerLine.reduce(0, +) - visibleRows)
-        let row = cursorRow - scrolledOff
-        guard row >= 0, row < visibleRows else { return nil }
+        let scrolledOff = max(0, rowsPerLine.reduce(0, +) - grid.rows)
+        return placement(frame: frame, padding: padding, balanced: balanced, cell: cell, scale: scale,
+                         row: cursorRow - scrolledOff, column: column)
+    }
+
+    /// The cell at a screen `row` and `column` of the visible grid (as a full-screen app
+    /// such as tmux reports them); nil outside the grid.
+    static func placement(frame: CGRect, padding: Padding, balanced: Bool = false, cell: CGSize, scale: CGFloat,
+                          row: Int, column: Int) -> Placement? {
+        func px(_ points: CGFloat) -> CGFloat { (points * scale).rounded(.down) }
+        guard let grid = size(frame: frame, padding: padding, cell: cell, scale: scale),
+              (0..<grid.rows).contains(row), (0..<grid.columns).contains(column) else { return nil }
+        let cellW = (cell.width * scale).rounded(), cellH = (cell.height * scale).rounded()
+        let width = px(frame.width), height = px(frame.height)
+
+        var left = px(padding.left), top = px(padding.top)
+        if balanced {
+            // Left and right get half the spare width each. The top gets half the spare
+            // height, but at most the average side padding plus half a cell; the bottom
+            // takes the rest.
+            left = ((width - CGFloat(grid.columns) * cellW) / 2).rounded(.down)
+            let topLimit = ((px(padding.left) + px(padding.right) + cellW) / 2).rounded(.down)
+            top = min(topLimit, ((height - CGFloat(grid.rows) * cellH) / 2).rounded(.down))
+        }
 
         let x = frame.minX + (left + CGFloat(column) * cellW) / scale
         let cellTop = frame.maxY - (top + CGFloat(row) * cellH) / scale
         return Placement(cell: CGRect(x: x, y: cellTop - cellH / scale, width: cellW / scale, height: cellH / scale),
                          gridMinX: frame.minX + left / scale,
-                         gridMaxX: frame.minX + (left + CGFloat(columns) * cellW) / scale)
+                         gridMaxX: frame.minX + (left + CGFloat(grid.columns) * cellW) / scale)
     }
 }

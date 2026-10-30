@@ -185,4 +185,19 @@ final class TerminalGridTests: XCTestCase {
         XCTAssertEqual(TerminalGrid.trimmingTrailingSpaces("    "), "")
         XCTAssertEqual(TerminalGrid.trimmingTrailingSpaces("x"), "x")
     }
+
+    /// tmux's 120×41 client: a frame of 120 by 41 cells of 8×17 pt plus 4 pt padding.
+    func testSizeAndScreenCell() {
+        let window = frame(100, 50, 968, 705)
+        let grid = TerminalGrid.size(frame: window, padding: padding, cell: CGSize(width: 8, height: 17), scale: 2)
+        XCTAssertEqual(grid?.columns, 120)
+        XCTAssertEqual(grid?.rows, 41)
+        // The right pane's cursor (pane_left 61 + cursor_x 3, row 29).
+        let cell = TerminalGrid.placement(frame: window, padding: padding, cell: CGSize(width: 8, height: 17), scale: 2,
+                                          row: 29, column: 64)?.cell
+        XCTAssertEqual(cell?.minX ?? 0, 100 + 4 + 64 * 8, accuracy: tolerance)
+        XCTAssertEqual(screenHeight - (cell?.maxY ?? 0), 50 + 4 + 29 * 17, accuracy: tolerance)
+        XCTAssertNil(TerminalGrid.placement(frame: window, padding: padding, cell: CGSize(width: 8, height: 17), scale: 2,
+                                            row: 41, column: 0))
+    }
 }

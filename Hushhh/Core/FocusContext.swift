@@ -580,8 +580,9 @@ struct FocusContext {
 
     /// Finds a terminal's cursor from its screen text (Ghostty). The grid's size comes from
     /// the window, padding and font size (see `TerminalGrid`); the text says how many grid
-    /// rows each line takes and where the cursor is: in a prompt box an app draws (see
-    /// `TerminalPrompt`), or else at the end of the last prompt line.
+    /// rows each line takes and where the cursor is. tmux, when running, says exactly (see
+    /// `TmuxClients`); otherwise in a prompt box an app draws (see `TerminalPrompt`), or
+    /// else at the end of the last prompt line.
     private static func terminalCaret(_ element: AXUIElement, frame: CGRect, value: String, bundleID: String?)
         -> (caret: CGRect, font: NSFont, cellWidth: CGFloat, lineStartX: CGFloat, rightEdgeX: CGFloat,
             textOffsetY: CGFloat, preceding: Character?)? {
@@ -594,32 +595,9 @@ struct FocusContext {
         var rows = ns.substring(from: start).components(separatedBy: "\n")
         if rows.count > 1, rows.last?.isEmpty == true { rows.removeLast() }
 
-        // Where the cursor is: in a prompt box an app draws (Claude Code, Codex), possibly
-        // beside a sidebar or other panes; otherwise at the end of the last prompt line.
-        let cursorLine: Int, column: Int, preceding: Character?
-        if let prompt = TerminalPrompt.locate(rows: rows) {
-            (cursorLine, column, preceding) = (prompt.row, prompt.column, prompt.preceding)
-        } else {
-            var lines = rows
-            // Blank rows below the prompt aren't where the cursor is.
-            while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
-            // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
-            guard let line = lines.last else { return nil }
-            let content = String(TerminalGrid.trimmingTrailingSpaces(line))
-            guard !content.isEmpty else { return nil }
-            // Full-screen apps (vim, tmux) end the screen with a bordered status line, not
-            // a prompt; there the cursor could be anywhere.
-            guard !["│", "┃", "║", "────"].contains(where: { content.contains($0) }) else { return nil }
-            // Trailing spaces are padding, except a prompt usually ends with one space
-            // before the cursor.
-            let promptSpace = line.count > content.count ? 1 : 0
-            cursorLine = lines.count - 1
-            column = TerminalPrompt.displayWidth(content) + promptSpace
-            preceding = promptSpace == 1 ? " " : content.last
-        }
-
         let config = bundleID == "com.mitchellh.ghostty" ? ghosttyConfig() : [:]
         let padding = TerminalGrid.padding(x: config["window-padding-x"], y: config["window-padding-y"])
+        let balanced = TerminalGrid.flag(config["window-padding-balance"])
         let size = config["font-size"].flatMap(Double.init).map { CGFloat($0) } ?? 13
         let pixelScale = NSScreen.screens.first { $0.frame.intersects(frame) }?.backingScaleFactor ?? 2
 
@@ -631,10 +609,56 @@ struct FocusContext {
                                   lineHeight: $0.ascender - $0.descender + $0.leading, scale: pixelScale)
         } ?? TerminalGrid.cellSize(fontSize: size, scale: pixelScale)
 
-        let widths = rows.map { TerminalPrompt.displayWidth(TerminalGrid.trimmingTrailingSpaces($0)) }
-        guard let placement = TerminalGrid.cursor(frame: frame, padding: padding, balanced: TerminalGrid.flag(config["window-padding-balance"]),
-                                             cell: cellSize, scale: pixelScale, lineWidths: widths,
-                                             cursorLine: cursorLine, cursorColumn: column) else { return nil }
+        let placement: TerminalGrid.Placement
+        let preceding: Character?
+        // tmux owns the whole screen and knows its cursor exactly: ask it, and pick the
+        // client the size of this terminal's grid.
+        if let grid = TerminalGrid.size(frame: frame, padding: padding, cell: cellSize, scale: pixelScale),
+           let output = TmuxQuery.listClients(),
+           case var appPID: pid_t = 0, AXUIElementGetPid(element, &appPID) == .success,
+           let tmux = TmuxClients.cursor(output: output, columns: grid.columns, rows: grid.rows,
+                                         isInApp: { TmuxQuery.isDescendant($0, of: appPID) }),
+           let found = TerminalGrid.placement(frame: frame, padding: padding, balanced: balanced, cell: cellSize,
+                                              scale: pixelScale, row: tmux.row, column: tmux.column) {
+            placement = found
+            // The screen text is exactly the grid's rows here; the character before the
+            // cursor is whatever occupies the previous cell.
+            let before = rows.indices.contains(tmux.row) && tmux.column > 0
+                ? TerminalPrompt.cells(rows[tmux.row]).last { $0.column < tmux.column }
+                : nil
+            preceding = before.map { $0.column + $0.width >= tmux.column ? $0.character : " " } ?? " "
+        } else {
+            // Otherwise: in a prompt box an app draws (Claude Code, Codex), possibly beside
+            // a sidebar or other panes; or else at the end of the last prompt line.
+            let cursorLine: Int, column: Int
+            if let prompt = TerminalPrompt.locate(rows: rows) {
+                (cursorLine, column, preceding) = (prompt.row, prompt.column, prompt.preceding)
+            } else {
+                var lines = rows
+                // Blank rows below the prompt aren't where the cursor is.
+                while lines.count > 1, lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+                // No visible prompt (e.g. a full-screen TUI): the cursor could be anywhere.
+                guard let line = lines.last else { return nil }
+                let content = String(TerminalGrid.trimmingTrailingSpaces(line))
+                guard !content.isEmpty else { return nil }
+                // Full-screen apps (vim, tmux) end the screen with a bordered status line, not
+                // a prompt; there the cursor could be anywhere.
+                guard !["│", "┃", "║", "────"].contains(where: { content.contains($0) }) else { return nil }
+                // tmux's status line, when tmux couldn't say where its cursor is.
+                guard !TmuxClients.looksLikeStatusLine(content) else { return nil }
+                // Trailing spaces are padding, except a prompt usually ends with one space
+                // before the cursor.
+                let promptSpace = line.count > content.count ? 1 : 0
+                cursorLine = lines.count - 1
+                column = TerminalPrompt.displayWidth(content) + promptSpace
+                preceding = promptSpace == 1 ? " " : content.last
+            }
+            let widths = rows.map { TerminalPrompt.displayWidth(TerminalGrid.trimmingTrailingSpaces($0)) }
+            guard let found = TerminalGrid.cursor(frame: frame, padding: padding, balanced: balanced,
+                                                  cell: cellSize, scale: pixelScale, lineWidths: widths,
+                                                  cursorLine: cursorLine, cursorColumn: column) else { return nil }
+            placement = found
+        }
         let cell = placement.cell
         let jetBrains = configured == nil ? NSFont(name: "JetBrainsMono-Regular", size: cell.width / 0.6) : nil
         let font = configured ?? jetBrains ?? monospacedFont(cellWidth: cell.width)
@@ -689,6 +713,7 @@ struct FocusContext {
         codeSettingsCache = [:]
         terminalFamilyCache = nil
         ghosttyCache = nil
+        TmuxQuery.beginSession()
     }
 
     private static func codeSettings(bundleID: String?) -> (families: [String], size: CGFloat?) {
