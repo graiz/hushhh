@@ -830,7 +830,6 @@ struct FocusContext {
         return NSFont.monospacedSystemFont(ofSize: cellWidth / advance, weight: .regular)
     }
 
-    /// Terminal columns a string occupies (wide emoji take two).
     /// Ghostty's config, read once per session.
     private static var ghosttyCache: [String: String]?
 

@@ -70,6 +70,10 @@ final class TerminalPromptTests: XCTestCase {
         assertLocate(rows, row: 1, column: 2, preceding: " ")
     }
 
+    func testHintNeedsClosingQuote() {
+        assertLocate([rule, "❯ Try \"this", rule], row: 1, column: 11, preceding: "s")
+    }
+
     func testNoBreakSpaceAfterMark() {
         let rows = ["sidebar  ▕│" + rule, "  agents ▕│❯\u{00A0}fix it", "         ▕│" + rule]
         assertLocate(rows, row: 1, column: 11 + 8, preceding: "t")
@@ -88,6 +92,29 @@ final class TerminalPromptTests: XCTestCase {
         let rows = [rule, "", "", "❯ hi", rule]
         assertLocate(rows, row: 3, column: 4, preceding: "i")
         XCTAssertNil(TerminalPrompt.locate(rows: [rule, "", "", "", "❯ hi", rule]))
+    }
+
+    /// A prompt box left on screen after the app exited, with output and a shell prompt
+    /// below it, isn't where the cursor is.
+    func testOldBoxAboveShellPromptIsIgnored() {
+        let rows = ["output", rule, "❯ fix the parser", rule, "  ⏵⏵ auto mode on",
+                    "Resume this session with: claude --resume 1234", "", "$ ls", "a b c", "$ "]
+        XCTAssertNil(TerminalPrompt.locate(rows: rows))
+        let starship = [rule, "❯ hi", rule, "one", "two", "three", "four", "❯ "]
+        XCTAssertNil(TerminalPrompt.locate(rows: starship))
+    }
+
+    /// Up to three status rows may follow the box.
+    func testThreeStatusRowsBelowBoxStillCount() {
+        let rows = [rule, "❯ hi", rule, "  status one", "", "  status two", "  status three"]
+        assertLocate(rows, row: 1, column: 4, preceding: "i")
+    }
+
+    /// Rows below the box in another pane don't count against it.
+    func testOtherPaneRowsBelowBoxDoNotCount() {
+        var rows = ["  claude    │" + rule, "  claude    │❯ hi", "  claude    │" + rule]
+        rows += Array(repeating: "○ session   │", count: 6)
+        assertLocate(rows, row: 1, column: 13 + 4, preceding: "i")
     }
 
     func testPlainShellPrompt() {

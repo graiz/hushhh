@@ -20,6 +20,11 @@ enum TerminalPrompt {
     /// How far above the prompt row the top rule may be.
     static let topRuleReach = 3
 
+    /// Rows with text the pane may show below the box (the app's status lines). More than
+    /// that means the box is left over from an app that has exited, with output and a
+    /// shell prompt below it.
+    static let rowsBelowLimit = 3
+
     /// Cells one character takes: emoji take two, everything else one.
     static func cellWidth(_ character: Character) -> Int {
         character.unicodeScalars.first?.properties.isEmojiPresentation == true ? 2 : 1
@@ -74,8 +79,10 @@ enum TerminalPrompt {
         -> (row: Int, column: Int, preceding: Character?)? {
         let prompt = grid[row]
         let markColumn = prompt[markIndex].column
-        // The pane ends at a border to the mark's right, if the row has one.
+        // The pane ends at a border to the mark's right, if the row has one, and starts
+        // after a border to its left.
         let paneEnd = prompt[(markIndex + 1)...].first { borders.contains($0.character) }?.column
+        let paneStart = prompt[..<markIndex].last { borders.contains($0.character) }.map { $0.column + $0.width } ?? 0
 
         // Top rule, within reach above.
         let above = max(0, row - topRuleReach)..<row
@@ -90,8 +97,11 @@ enum TerminalPrompt {
             next += 1
         }
         // Bottom rule, right below the input or one row further.
-        guard (last + 1...last + 2).contains(where: { grid.indices.contains($0) && isRule(grid[$0], from: markColumn, to: paneEnd) })
+        guard let bottom = (last + 1...last + 2).first(where: { grid.indices.contains($0) && isRule(grid[$0], from: markColumn, to: paneEnd) })
         else { return nil }
+        // Only a few status rows may follow it in the same pane.
+        let rowsBelow = grid[(bottom + 1)...].filter { !text($0, from: paneStart, to: paneEnd).isEmpty }.count
+        guard rowsBelow <= rowsBelowLimit else { return nil }
 
         let textStart = markColumn + 2
         let promptText = text(prompt, from: textStart, to: paneEnd)
@@ -138,9 +148,11 @@ enum TerminalPrompt {
     }
 
     /// The hint an empty prompt box shows (`Try "…"`, or `Message @name…` when the input
-    /// goes to a named agent).
+    /// goes to a named agent). The screen text has no colour, so typed input that has
+    /// exactly a hint's shape is taken for a hint.
     static func isPlaceholder(_ text: [Cell]) -> Bool {
         let string = String(text.map(\.character))
-        return string.hasPrefix("Try \"") || (string.hasPrefix("Message @") && string.hasSuffix("…"))
+        return (string.count > 6 && string.hasPrefix("Try \"") && string.hasSuffix("\""))
+            || (string.hasPrefix("Message @") && string.hasSuffix("…"))
     }
 }
