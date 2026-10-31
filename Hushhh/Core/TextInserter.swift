@@ -153,16 +153,20 @@ enum TextInserter {
 
     static func type(_ text: String) {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let utf16 = Array(text.utf16)
-        var index = 0
-        while index < utf16.count {
-            let chunk = Array(utf16[index..<min(index + 20, utf16.count)])
+        // About 20 UTF-16 units per event, split only between characters so an emoji's
+        // surrogate pair is never cut in two.
+        var chunks: [[UInt16]] = [[]]
+        for character in text {
+            let units = Array(String(character).utf16)
+            if chunks[chunks.count - 1].count + units.count > 20, !chunks[chunks.count - 1].isEmpty { chunks.append([]) }
+            chunks[chunks.count - 1] += units
+        }
+        for chunk in chunks where !chunk.isEmpty {
             for keyDown in [true, false] {
                 let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown)
                 event?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
                 event?.post(tap: .cghidEventTap)
             }
-            index += 20
             usleep(2_000)
         }
     }

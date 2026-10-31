@@ -200,4 +200,10 @@ final class TerminalGridTests: XCTestCase {
         XCTAssertNil(TerminalGrid.placement(frame: window, padding: padding, cell: CGSize(width: 8, height: 17), scale: 2,
                                             row: 41, column: 0))
     }
+
+    func testNonFiniteFrameHasNoGrid() {
+        let frame = CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 600)
+        XCTAssertNil(TerminalGrid.size(frame: frame, padding: TerminalGrid.padding(x: nil, y: nil),
+                                       cell: CGSize(width: 8, height: 17), scale: 2))
+    }
 }

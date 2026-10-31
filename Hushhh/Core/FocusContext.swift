@@ -857,7 +857,8 @@ struct FocusContext {
     /// A frame that's on screen and big enough to hold text (Google Docs' focused
     /// element, for example, is a hidden 1-pixel strip).
     static func isUsable(_ frame: CGRect) -> Bool {
-        frame.width > 20 && frame.height > 8 && NSScreen.screens.contains { $0.frame.intersects(frame) }
+        frame.origin.x.isFinite && frame.origin.y.isFinite && frame.width.isFinite && frame.height.isFinite
+            && frame.width > 20 && frame.height > 8 && NSScreen.screens.contains { $0.frame.intersects(frame) }
     }
 
     /// The page address of a web element: its own AXURL, else its web area's.

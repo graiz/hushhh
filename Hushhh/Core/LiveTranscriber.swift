@@ -184,9 +184,12 @@ final class LiveTranscriber {
         let live = long && !TranscriptTail.isSilent(audio[...], sampleRate: Self.sampleRate)
             ? await Self.transcribe(audio, with: engine, padded: true, speechPeak: speechPeak).text : ""
         let text = SpeechSegmenter.join(settled, live)
-        // Kept even when cancelled mid-pass, so the finish can use it.
+        // Kept even when cancelled mid-pass, so the finish can use it. An engine can return
+        // nothing when cancelled, so an empty cancelled pass doesn't count as covering the
+        // audio: the finish then transcribes it.
         let liveFrom = from
-        lock.withLock { latest = (text, live, long ? liveFrom + audio.count : liveFrom, liveFrom) }
+        let covered = long && !(Task.isCancelled && live.isEmpty) ? liveFrom + audio.count : liveFrom
+        lock.withLock { latest = (text, live, covered, liveFrom) }
         if Task.isCancelled { return true }
         await MainActor.run { self.onPartial?(text) }
         return true

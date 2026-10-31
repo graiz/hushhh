@@ -276,7 +276,9 @@ final class OverlayController {
             // Don't sit on the app's own controls (e.g. Google Docs' template buttons under
             // an empty page): if there are buttons below the line, go above it instead.
             let below = CGRect(origin: origin, size: size).insetBy(dx: margin, dy: margin)
-            let key = Int(below.minY.rounded()) &* 31 &+ Int(below.minX.rounded())
+            // Positions come from other apps; one that isn't finite would trap converting to Int.
+            let key = below.minX.isFinite && below.minY.isFinite
+                ? Int(below.minY.rounded()) &* 31 &+ Int(below.minX.rounded()) : 0
             if chipPlacementKey != key {
                 chipPlacementKey = key
                 let aboveRect = CGRect(origin: above, size: size).insetBy(dx: margin, dy: margin)
@@ -323,7 +325,8 @@ final class OverlayController {
                 if let role = role as? String, controlRoles.contains(role) { return true }
                 var parent: CFTypeRef?
                 AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent)
-                element = parent.map { $0 as! AXUIElement }
+                guard let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+                element = (parent as! AXUIElement)
             }
         }
         return false

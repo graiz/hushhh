@@ -49,7 +49,15 @@ enum CapsLockRemapper {
     }
 
     static func disable() {
-        guard isActive else { return }
+        guard isActive else {
+            // A run that didn't get to restore (force quit, crash) may have left the remap
+            // behind; undo it when Caps Lock isn't the dictation key any more.
+            if let current = currentMappings(), current.contains(where: isOurs) {
+                let saved = UserDefaults.standard.array(forKey: savedKey) as? [[String: UInt64]]
+                if apply(saved ?? current.filter { !isOurs($0) }) { UserDefaults.standard.removeObject(forKey: savedKey) }
+            }
+            return
+        }
         let defaults = UserDefaults.standard
         let original = defaults.array(forKey: savedKey) as? [[String: UInt64]] ?? []
         if apply(original) {

@@ -563,6 +563,10 @@ private struct DictationKeyRow: View {
             }
         }
         .onDisappear { stopRecording() }
+        // The window stays alive when closed, so this view may never disappear: stop
+        // recording when it closes or Hushhh loses focus, or the dictation key stays off.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in stopRecording() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in stopRecording() }
         if let problem {
             Text(problem).font(.caption).foregroundStyle(.orange)
         }

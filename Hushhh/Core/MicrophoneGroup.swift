@@ -18,6 +18,9 @@ final class MicrophoneGroup {
     private let resolve: () -> [AudioDeviceID?]
     private var devices: [AudioDeviceID?] = [nil]
     private let lock = NSLock()
+    /// Held while handing audio on, so the chosen microphone's buffered audio goes out
+    /// before any newer audio from it, whichever thread made the choice.
+    private let delivery = NSLock()
     private var recorders: [Int: AudioRecorder] = [:]
     private var meters: [MicrophoneChoice.Meter] = []
     private var buffers: [[Float]] = []
@@ -89,7 +92,7 @@ final class MicrophoneGroup {
         guard !stopped else { lock.unlock(); return }
         if let chosen {
             lock.unlock()
-            if chosen == index { onSamples?(samples) }
+            if chosen == index { delivery.withLock { onSamples?(samples) } }
             return
         }
         meters[index].add(samples)
@@ -103,10 +106,11 @@ final class MicrophoneGroup {
         buffers = []
         let others = recorders.filter { $0.key != pick }.map(\.value)
         recorders = recorders.filter { $0.key == pick }
+        delivery.lock()
         lock.unlock()
 
-        // Later audio from the chosen microphone arrives on this same thread, after this.
         onSamples?(heard)
+        delivery.unlock()
         onChoice?(choice, devices)
         // Not from inside an audio callback.
         DispatchQueue.global(qos: .utility).async { others.forEach { $0.stop() } }

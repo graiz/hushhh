@@ -78,7 +78,7 @@ enum TerminalGrid {
     static func size(frame: CGRect, padding: Padding, cell: CGSize, scale: CGFloat) -> (columns: Int, rows: Int)? {
         func px(_ points: CGFloat) -> CGFloat { (points * scale).rounded(.down) }
         let cellW = (cell.width * scale).rounded(), cellH = (cell.height * scale).rounded()
-        guard cellW > 0, cellH > 0 else { return nil }
+        guard cellW > 0, cellH > 0, frame.width.isFinite, frame.height.isFinite else { return nil }
         let columns = Int(max(0, px(frame.width) - px(padding.left) - px(padding.right)) / cellW)
         let rows = Int(max(0, px(frame.height) - px(padding.top) - px(padding.bottom)) / cellH)
         guard columns > 0, rows > 0 else { return nil }

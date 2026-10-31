@@ -601,6 +601,8 @@ final class DictationController: ObservableObject {
     }
 
     private func cancel() {
+        // Esc reaches here a moment after the key press; by then the key may have finished.
+        guard state == .listening || state == .starting else { return }
         startToken = nil
         maxDurationWork?.cancel()
         if let live { RecentRecordings.save(live.recording(), transcript: overlay.model.text, outcome: "cancelled") }
@@ -621,6 +623,8 @@ final class DictationController: ObservableObject {
     }
 
     private func teardownAudio(keepTranscriber: Bool = false) {
+        // A session that ended any way at all must not be finished by its time limit later.
+        maxDurationWork?.cancel()
         if let recorder { Self.audioQueue.async { recorder.stop() } }
         recorder = nil
         if !keepTranscriber {
