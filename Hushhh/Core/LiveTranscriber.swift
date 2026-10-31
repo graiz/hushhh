@@ -61,6 +61,11 @@ final class LiveTranscriber {
         lock.unlock()
     }
 
+    /// The whole recording so far, copied.
+    func recording() -> [Float] {
+        lock.withLock { samples }
+    }
+
     /// The audio from `start` on, copied so a pass doesn't hold the whole recording.
     private func region(from start: Int) -> (audio: [Float], total: Int, peak: Float, speechPeak: Float) {
         lock.lock(); defer { lock.unlock() }

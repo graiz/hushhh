@@ -219,6 +219,7 @@ final class DictationController: ObservableObject {
 
         // Before capture, so what capture logs about this session is written.
         FocusLog.isEnabled = prefs.diagnosticLog
+        RecentRecordings.isEnabled = UserDefaults.standard.bool(forKey: "keepRecentRecordings")
         let context = FocusContext.capture()
         focus = context
         if context.isSecure {
@@ -424,6 +425,7 @@ final class DictationController: ObservableObject {
                 rest = await live.transcribeRest(after: settled.upTo)
             }
             self.live = nil
+            RecentRecordings.save(live.recording(), transcript: SpeechSegmenter.join(settled.text, rest), outcome: "inserted")
             if let firstPaste, let firstInsert {
                 let first = await firstInsert.value
                 await self.finishContinuation(rest, after: firstPaste, first: first)
@@ -492,6 +494,7 @@ final class DictationController: ObservableObject {
             self.teardownAudio(keepTranscriber: true)
             let text = await live.finishFast().trimmingCharacters(in: .whitespacesAndNewlines)
             self.live = nil
+            RecentRecordings.save(live.recording(), transcript: text, outcome: "polished")
             guard !text.isEmpty else {
                 self.overlay.model.busyLabel = nil
                 self.finishSession(with: text)
@@ -554,6 +557,7 @@ final class DictationController: ObservableObject {
     private func cancel() {
         startToken = nil
         maxDurationWork?.cancel()
+        if let live { RecentRecordings.save(live.recording(), transcript: overlay.model.text, outcome: "cancelled") }
         teardownAudio()
         state = .idle
         overlay.hide()

@@ -58,6 +58,8 @@ HUSHHH_DEV=1 $APP --align-test --bundle <id> [--markers] --phase draw --no-move 
                                                           # draws red ghost text at that app's cursor (--hero: as users see it; --markers: use text markers, skip index lookups)
 ```
 
+To replay a dictation that came out wrong, have Hushhh keep the last 5 recordings with `defaults write com.graizlabs.hushhh keepRecentRecordings -bool true` (read at the start of each dictation; `-bool false` turns it off). Each one is saved at `~/Library/Logs/Hushhh/Recordings/<time>.wav`, readable only by you, next to a `.txt` with how the session ended (inserted, polished or cancelled) and its transcript. Pass the `.wav` to `--transcribe` to reproduce it.
+
 ## Placement overrides
 
 Some apps report their text slightly off. A few numbers can fix that. Settings › Privacy › Troubleshooting › Edit Placement Overrides opens `~/Library/Application Support/Hushhh/app-overrides.json`, which is read once per dictation session, so edits apply to the next dictation.
