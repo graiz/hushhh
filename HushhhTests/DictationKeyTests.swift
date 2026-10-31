@@ -47,6 +47,14 @@ final class DictationKeyTests: XCTestCase {
         XCTAssertEqual(DictationKey.name(keyCode: 200, characters: nil), "Key 200")
     }
 
+    func testPresetsAreAllowedAndDistinct() {
+        for key in DictationKey.presets where !key.isCapsLock {
+            XCTAssertNil(DictationKey.rejection(keyCode: key.keyCode, modifiers: key.modifiers), key.title)
+        }
+        XCTAssertEqual(Set(DictationKey.presets.map(\.id)).count, DictationKey.presets.count)
+        XCTAssertEqual(DictationKey.presets.first, .capsLock)
+    }
+
     func testRoundTripsThroughJSON() throws {
         let key = DictationKey(keyCode: 2, modifiers: [.option, .command], name: "D")
         let decoded = try JSONDecoder().decode(DictationKey.self, from: JSONEncoder().encode(key))

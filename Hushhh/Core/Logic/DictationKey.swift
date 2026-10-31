@@ -27,6 +27,16 @@ struct DictationKey: Codable, Equatable {
     static let capsLock = DictationKey(keyCode: capsLockKeyCode, modifiers: [], name: "Caps Lock")
 
     var isCapsLock: Bool { keyCode == Self.capsLockKeyCode }
+    /// Tells keys apart in a menu: the same key and modifiers, whatever its label.
+    var id: String { "\(keyCode)-\(modifiers.rawValue)" }
+
+    /// Offered in Settings besides a recorded shortcut.
+    static let presets: [DictationKey] = [
+        .capsLock,
+        DictationKey(keyCode: 96, modifiers: [], name: "F5"),
+        DictationKey(keyCode: 105, modifiers: [], name: "F13"),
+        DictationKey(keyCode: 49, modifiers: [.option], name: "Space"),
+    ]
 
     /// Short form for key hints: "⇪", "F5", "⌥D".
     var symbol: String { isCapsLock ? "⇪" : modifiers.symbols + name }

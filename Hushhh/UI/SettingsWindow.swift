@@ -520,25 +520,46 @@ struct PolishSettings: View {
     }
 }
 
-/// Shows the dictation key, records a new one from the next key press, and resets it to Caps Lock.
+/// A menu of dictation keys: Caps Lock first, a few common choices, the person's own
+/// shortcut if they recorded one, and an item that records a new one from the next key press.
 private struct DictationKeyRow: View {
     @EnvironmentObject private var prefs: Preferences
     @State private var monitor: Any?
     @State private var problem: String?
+    private static let recordTag = "record"
+
+    private var choices: [DictationKey] {
+        DictationKey.presets.contains(where: { $0.id == prefs.dictationKey.id }) ? DictationKey.presets : DictationKey.presets + [prefs.dictationKey]
+    }
+
+    private var selection: Binding<String> {
+        Binding(get: { prefs.dictationKey.id }, set: { tag in
+            if tag == Self.recordTag {
+                startRecording()
+            } else if let key = choices.first(where: { $0.id == tag }) {
+                problem = nil
+                prefs.dictationKey = key
+            }
+        })
+    }
 
     var body: some View {
         LabeledContent("Dictation key") {
-            HStack(spacing: 8) {
-                if monitor != nil {
-                    Text("Press a key…").foregroundStyle(.secondary)
+            if monitor != nil {
+                HStack(spacing: 8) {
+                    Text("Press a shortcut…").foregroundStyle(.secondary)
                     Button("Cancel") { stopRecording() }
-                } else {
-                    KeyCap(prefs.dictationKey.title)
-                    Button("Record New Key…") { startRecording() }
-                    if !prefs.dictationKey.isCapsLock {
-                        Button("Reset to Caps Lock") { prefs.dictationKey = .capsLock }
-                    }
                 }
+            } else {
+                Picker("Dictation key", selection: selection) {
+                    ForEach(choices, id: \.id) { key in
+                        Text(key.isCapsLock ? "⇪ Caps Lock (Default)" : key.title).tag(key.id)
+                    }
+                    Divider()
+                    Text("Record Shortcut…").tag(Self.recordTag)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
         }
         .onDisappear { stopRecording() }
