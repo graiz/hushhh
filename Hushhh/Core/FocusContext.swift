@@ -611,6 +611,9 @@ struct FocusContext {
 
         let placement: TerminalGrid.Placement
         let preceding: Character?
+        // In a prompt box, wrapped input lines start at the input's column and end at
+        // the pane's edge, not the window's.
+        var promptColumns: (start: Int, end: Int?)?
         // tmux owns the whole screen and knows its cursor exactly: ask it, and pick the
         // client the size of this terminal's grid.
         if let grid = TerminalGrid.size(frame: frame, padding: padding, cell: cellSize, scale: pixelScale),
@@ -632,6 +635,7 @@ struct FocusContext {
             let cursorLine: Int, column: Int
             if let prompt = TerminalPrompt.locate(rows: rows) {
                 (cursorLine, column, preceding) = (prompt.row, prompt.column, prompt.preceding)
+                promptColumns = (prompt.textColumn, prompt.paneEnd)
             } else {
                 var lines = rows
                 // Blank rows below the prompt aren't where the cursor is.
@@ -664,8 +668,13 @@ struct FocusContext {
         // The substitute for JetBrains Mono sits about 1 pt lower in the cell (measured):
         // lift the ghost text, not the caret.
         let textOffsetY: CGFloat = configured == nil && jetBrains == nil ? 1 : 0
+        var lineStartX = placement.gridMinX, rightEdgeX = placement.gridMaxX
+        if let promptColumns {
+            lineStartX = min(cell.minX, placement.gridMinX + CGFloat(promptColumns.start) * cell.width)
+            if let end = promptColumns.end { rightEdgeX = min(rightEdgeX, placement.gridMinX + CGFloat(end) * cell.width) }
+        }
         return (CGRect(x: cell.minX, y: cell.minY, width: 1, height: cell.height), font, cell.width,
-                placement.gridMinX, placement.gridMaxX, textOffsetY, preceding)
+                lineStartX, rightEdgeX, textOffsetY, preceding)
     }
 
     /// Moves a code editor's hidden-input caret right by its column's worth of cells.

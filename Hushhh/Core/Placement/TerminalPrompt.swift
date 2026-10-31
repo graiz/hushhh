@@ -47,9 +47,10 @@ enum TerminalPrompt {
 
     /// The cursor in a prompt box on screen.
     /// - Parameter rows: the screen text, one string per row.
-    /// - Returns: the cursor's row (an index into `rows`), its column in cells, and the
-    ///   character before it; nil when no prompt bounded by rules is on screen.
-    static func locate(rows: [String]) -> (row: Int, column: Int, preceding: Character?)? {
+    /// - Returns: the cursor's row (an index into `rows`), its column in cells, the
+    ///   character before it, the column the input's lines start at, and the column of
+    ///   the pane's right border if it has one; nil when no prompt bounded by rules is on screen.
+    static func locate(rows: [String]) -> Found? {
         let grid = rows.map(cells)
         for row in grid.indices.reversed() {
             for markIndex in markCandidates(grid[row]) {
@@ -75,8 +76,15 @@ enum TerminalPrompt {
         return found
     }
 
-    private static func bounded(grid: [[Cell]], row: Int, markIndex: Int)
-        -> (row: Int, column: Int, preceding: Character?)? {
+    struct Found: Equatable {
+        var row: Int
+        var column: Int
+        var preceding: Character?
+        var textColumn: Int
+        var paneEnd: Int?
+    }
+
+    private static func bounded(grid: [[Cell]], row: Int, markIndex: Int) -> Found? {
         let prompt = grid[row]
         let markColumn = prompt[markIndex].column
         // The pane ends at a border to the mark's right, if the row has one, and starts
@@ -104,13 +112,16 @@ enum TerminalPrompt {
         guard rowsBelow <= rowsBelowLimit else { return nil }
 
         let textStart = markColumn + 2
+        func found(_ row: Int, _ column: Int, _ preceding: Character?) -> Found {
+            Found(row: row, column: column, preceding: preceding, textColumn: textStart, paneEnd: paneEnd)
+        }
         let promptText = text(prompt, from: textStart, to: paneEnd)
         if last == row {
-            if promptText.isEmpty || isPlaceholder(promptText) { return (row, textStart, " ") }
+            if promptText.isEmpty || isPlaceholder(promptText) { return found(row, textStart, " ") }
         }
         let lastText = last == row ? promptText : text(grid[last], from: textStart, to: paneEnd)
-        guard let end = lastText.last else { return (row, textStart, " ") }
-        return (last, end.column + end.width, end.character)
+        guard let end = lastText.last else { return found(row, textStart, " ") }
+        return found(last, end.column + end.width, end.character)
     }
 
     /// Whether the row's cells from `start` to `end` (or to the next border, or the row's

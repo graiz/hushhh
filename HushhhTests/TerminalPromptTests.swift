@@ -33,6 +33,8 @@ final class TerminalPromptTests: XCTestCase {
         let rows = paneManagerScreen
         XCTAssertEqual(rows.count, 46)
         assertLocate(rows, row: 42, column: 27, preceding: " ")
+        XCTAssertEqual(TerminalPrompt.locate(rows: rows)?.textColumn, 27)
+        XCTAssertNil(TerminalPrompt.locate(rows: rows)?.paneEnd)
     }
 
     func testBoxWithoutSidebar() {
@@ -43,6 +45,8 @@ final class TerminalPromptTests: XCTestCase {
     func testBorderedBox() {
         let rows = ["╭─────────────────╮", "│ > hello         │", "╰─────────────────╯", "  ? for shortcuts"]
         assertLocate(rows, row: 1, column: 9, preceding: "o")
+        XCTAssertEqual(TerminalPrompt.locate(rows: rows)?.textColumn, 4)
+        XCTAssertEqual(TerminalPrompt.locate(rows: rows)?.paneEnd, 18)
     }
 
     func testTypedInput() {
