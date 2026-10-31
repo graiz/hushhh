@@ -23,6 +23,8 @@ final class OverlayModel: ObservableObject {
     @Published var fontSize: CGFloat = 14
     @Published var placement: Placement = .pill
     @Published var showHint = true
+    /// The dictation key's symbol, for the insert hint.
+    @Published var keySymbol = "⇪"
     @Published var engineLoading = false
     /// Shown while finishing, e.g. "Polishing with Claude…".
     @Published var busyLabel: String?
@@ -607,7 +609,7 @@ struct OverlayView: View {
                         if model.phase == .finishing {
                             Text(model.busyLabel ?? "Finishing…").font(.system(size: 13)).foregroundStyle(.secondary)
                         } else if model.showHint {
-                            HintRow(insertLabel: "Insert", showPolish: model.canPolish)
+                            HintRow(keySymbol: model.keySymbol, insertLabel: "Insert", showPolish: model.canPolish)
                         } else {
                             Text(model.engineLoading ? "Loading model…" : "Listening").font(.system(size: 13)).foregroundStyle(.secondary)
                         }
@@ -621,7 +623,7 @@ struct OverlayView: View {
                     if let busy = model.busyLabel, model.phase == .finishing {
                         Text(busy).font(.system(size: 13)).foregroundStyle(.secondary)
                     } else if model.showHint && model.phase == .listening {
-                        HintRow(insertLabel: "Insert", showPolish: model.canPolish)
+                        HintRow(keySymbol: model.keySymbol, insertLabel: "Insert", showPolish: model.canPolish)
                     }
                 }
             }
@@ -675,12 +677,13 @@ struct OverlayView: View {
 
 /// Keyboard hint shown while listening.
 private struct HintRow: View {
+    let keySymbol: String
     let insertLabel: String
     var showPolish = false
 
     var body: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 4) { KeyCap("⇪"); Text(insertLabel) }
+            HStack(spacing: 4) { KeyCap(keySymbol); Text(insertLabel) }
             if showPolish {
                 HStack(spacing: 4) { KeyCap("tab"); Text("Polish") }
             }

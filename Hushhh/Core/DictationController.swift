@@ -71,13 +71,16 @@ final class DictationController: ObservableObject {
         .store(in: &cancellables)
 
         prefs.$showHints.sink { [weak self] in self?.overlay.model.showHint = $0 }.store(in: &cancellables)
+        prefs.$dictationKey.sink { [weak self] in self?.overlay.model.keySymbol = $0.symbol }.store(in: &cancellables)
+        // A key recorded in Settings applies at once.
+        prefs.$dictationKey.dropFirst().removeDuplicates().sink { [weak self] in self?.useDictationKey($0) }.store(in: &cancellables)
     }
 
     // MARK: Lifecycle
 
     func activate() {
         PolishService.refresh()
-        CapsLockRemapper.enable()
+        useDictationKey(prefs.dictationKey)
         startHotkeys()
         prepareEngine()
     }
@@ -88,6 +91,12 @@ final class DictationController: ObservableObject {
         // Accessibility Hushhh switched on stays on while it runs, so each dictation finds the
         // caret at once; switch it off as Hushhh quits.
         FocusContext.releaseAccessibility()
+    }
+
+    /// Caps Lock is remapped only while it's the dictation key, so another key leaves it working as usual.
+    private func useDictationKey(_ key: DictationKey) {
+        hotkeys.key = key
+        if key.isCapsLock { CapsLockRemapper.enable() } else { CapsLockRemapper.disable() }
     }
 
     /// The event tap needs Accessibility; keep trying until it's granted.
@@ -248,7 +257,7 @@ final class DictationController: ObservableObject {
             // Ask first; starting the microphone while the prompt is up would stall.
             permissions.requestMicrophone()
             overlay.show(anchor: anchor)
-            overlay.flash(symbol: "mic", text: "Allow microphone access, then press Caps Lock again", duration: 3)
+            overlay.flash(symbol: "mic", text: "Allow microphone access, then press \(prefs.dictationKey.spoken) again", duration: 3)
             return
         }
         if audioStartPending {

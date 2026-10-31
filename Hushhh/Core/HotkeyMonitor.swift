@@ -132,6 +132,12 @@ enum CapsLockRemapper {
 
 /// Watches the keyboard through a session event tap. Requires Accessibility.
 final class HotkeyMonitor {
+    /// The dictation key. Caps Lock arrives as F18 while it's remapped.
+    var key = DictationKey.capsLock
+    /// True while Settings records a new dictation key, so every press reaches it.
+    nonisolated(unsafe) static var isRecordingKey = false
+    /// The recorded key whose press was taken, so its release is taken too.
+    private var heldKeyCode: Int?
     var onTriggerDown: (() -> Void)?
     var onTriggerUp: (() -> Void)?
     /// Return true to swallow the Escape key (only while dictating).
@@ -165,6 +171,7 @@ final class HotkeyMonitor {
 
     func stop() {
         swallowingTab = false
+        heldKeyCode = nil
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil
@@ -176,20 +183,30 @@ final class HotkeyMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
         }
+        guard !Self.isRecordingKey else { return Unmanaged.passUnretained(event) }
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
         switch (type, keyCode) {
         // Handlers run after the callback returns: a slow handler inside an
         // event tap freezes keyboard input and gets the tap disabled.
-        // F18 is only ours while Caps Lock is remapped to it; a real F18 key passes through.
-        case (.keyDown, kVK_F18) where CapsLockRemapper.isActive:
+        case (.keyDown, _) where !key.isCapsLock && key.matches(keyCode: keyCode, modifiers: Self.modifiers(event.flags)):
+            heldKeyCode = keyCode
             if !isRepeat { DispatchQueue.main.async { self.onTriggerDown?() } }
             return nil
-        case (.keyUp, kVK_F18) where CapsLockRemapper.isActive:
+        case (.keyUp, _) where keyCode == heldKeyCode:
+            // Released with or without its modifiers still held.
+            heldKeyCode = nil
             DispatchQueue.main.async { self.onTriggerUp?() }
             return nil
-        case (.flagsChanged, kVK_CapsLock):
+        // F18 is only ours while Caps Lock is remapped to it; a real F18 key passes through.
+        case (.keyDown, kVK_F18) where key.isCapsLock && CapsLockRemapper.isActive:
+            if !isRepeat { DispatchQueue.main.async { self.onTriggerDown?() } }
+            return nil
+        case (.keyUp, kVK_F18) where key.isCapsLock && CapsLockRemapper.isActive:
+            DispatchQueue.main.async { self.onTriggerUp?() }
+            return nil
+        case (.flagsChanged, kVK_CapsLock) where key.isCapsLock:
             // Fallback when the remap isn't active: treat each toggle as a tap.
             DispatchQueue.main.async {
                 self.onTriggerDown?()
@@ -219,6 +236,18 @@ final class HotkeyMonitor {
             break
         }
         return Unmanaged.passUnretained(event)
+    }
+}
+
+extension HotkeyMonitor {
+    /// The modifiers that tell keys apart; Fn (set for function keys) and Caps Lock aren't among them.
+    static func modifiers(_ flags: CGEventFlags) -> DictationKey.Modifiers {
+        var result: DictationKey.Modifiers = []
+        if flags.contains(.maskControl) { result.insert(.control) }
+        if flags.contains(.maskAlternate) { result.insert(.option) }
+        if flags.contains(.maskShift) { result.insert(.shift) }
+        if flags.contains(.maskCommand) { result.insert(.command) }
+        return result
     }
 }
 

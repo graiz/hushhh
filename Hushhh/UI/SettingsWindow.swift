@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import ServiceManagement
+import Carbon.HIToolbox
 
 enum SettingsTab: Int, CaseIterable {
     case general, typing, models, polish, permissions
@@ -80,10 +81,11 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Dictation key") { KeyCap("⇪ Caps Lock") }
+                DictationKeyRow()
                 Toggle("Hold to talk", isOn: $prefs.holdToTalk)
             } footer: {
-                SettingsFooter("Press Caps Lock to start and again to insert; Esc cancels. With Hold to talk, hold Caps Lock while speaking and release it to insert.")
+                let key = prefs.dictationKey.spoken
+                SettingsFooter("Press \(key) to start and again to insert; Esc cancels. With Hold to talk, hold \(key) while speaking and release it to insert.")
             }
 
             Section("Feedback") {
@@ -512,6 +514,82 @@ struct PolishSettings: View {
     }
 }
 
+/// Shows the dictation key, records a new one from the next key press, and resets it to Caps Lock.
+private struct DictationKeyRow: View {
+    @EnvironmentObject private var prefs: Preferences
+    @State private var monitor: Any?
+    @State private var problem: String?
+
+    var body: some View {
+        LabeledContent("Dictation key") {
+            HStack(spacing: 8) {
+                if monitor != nil {
+                    Text("Press a key…").foregroundStyle(.secondary)
+                    Button("Cancel") { stopRecording() }
+                } else {
+                    KeyCap(prefs.dictationKey.title)
+                    Button("Record New Key…") { startRecording() }
+                    if !prefs.dictationKey.isCapsLock {
+                        Button("Reset to Caps Lock") { prefs.dictationKey = .capsLock }
+                    }
+                }
+            }
+        }
+        .onDisappear { stopRecording() }
+        if let problem {
+            Text(problem).font(.caption).foregroundStyle(.orange)
+        }
+    }
+
+    private func startRecording() {
+        problem = nil
+        // Dictation keys pass through to here while recording, including the current one.
+        HotkeyMonitor.isRecordingKey = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            record(event)
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        HotkeyMonitor.isRecordingKey = false
+    }
+
+    private func record(_ event: NSEvent) {
+        let code = Int(event.keyCode)
+        // Caps Lock arrives as F18 while Hushhh has it remapped, or as a modifier change otherwise.
+        let isCapsLock = (event.type == .keyDown && code == kVK_F18 && CapsLockRemapper.isActive)
+            || (event.type == .flagsChanged && code == kVK_CapsLock)
+        if isCapsLock {
+            prefs.dictationKey = .capsLock
+            stopRecording()
+            return
+        }
+        // Modifiers alone just build up a shortcut.
+        guard event.type == .keyDown else { return }
+        let flags = event.modifierFlags
+        var modifiers: DictationKey.Modifiers = []
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if code == DictationKey.escapeKeyCode, modifiers.isEmpty {
+            stopRecording()
+            return
+        }
+        if let rejection = DictationKey.rejection(keyCode: code, modifiers: modifiers) {
+            problem = rejection
+        } else {
+            prefs.dictationKey = DictationKey(keyCode: code, modifiers: modifiers,
+                                              name: DictationKey.name(keyCode: code, characters: event.charactersIgnoringModifiers))
+            problem = nil
+        }
+        stopRecording()
+    }
+}
+
 // MARK: - Permissions
 
 struct PermissionSettings: View {
@@ -532,7 +610,9 @@ struct PermissionSettings: View {
                               status: permissions.accessibility,
                               action: permissions.requestAccessibility)
             } footer: {
-                SettingsFooter("While Hushhh is running, Caps Lock is reserved for dictation. Quitting Hushhh restores it.")
+                SettingsFooter(prefs.dictationKey.isCapsLock
+                    ? "While Hushhh is running, Caps Lock is reserved for dictation. Quitting Hushhh restores it."
+                    : "While Hushhh is running, \(prefs.dictationKey.spoken) is reserved for dictation.")
             }
             Section {
                 Toggle("Write a diagnostic log", isOn: $prefs.diagnosticLog)

@@ -61,7 +61,7 @@ struct MenuBarContent: View {
         case .needsModel: return "No Speech Model Downloaded"
         case .loading: return "Loading \(dictation.activeEngineName)…"
         case .failed: return "Model Failed to Load"
-        case .ready: return "Ready — Press ⇪ Caps Lock to Dictate"
+        case .ready: return "Ready — Press \(prefs.dictationKey.title) to Dictate"
         }
     }
 }

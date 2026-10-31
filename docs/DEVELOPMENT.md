@@ -28,7 +28,7 @@ Hushhh uses the hardened runtime without the App Sandbox (it needs Accessibility
 
 ## How it works
 
-- A session event tap catches Caps Lock (as F18): press once to start and again to finish. Hold-to-talk is optional. Esc cancels. Tab polishes, when enabled. The tap only reacts to those keys.
+- A session event tap catches Caps Lock (as F18): press once to start and again to finish. Hold-to-talk is optional. Esc cancels. Tab polishes, when enabled. A key recorded in Settings replaces Caps Lock, which is then left unmapped. The tap only reacts to those keys.
 - Audio is captured at 16 kHz and transcribed every ~300 ms, so the ghost text fills in as you speak. Speech up to a natural pause (at least 2 s after the last one, 300 ms of quiet) is transcribed once and settled; each update covers only the audio since then, so updates and the final pass stay fast however long you talk. Without a pause, the quietest moment after 25 s is used.
 - Caps Lock pastes the settled text at once, then finishes only the last stretch and pastes it right after. A dictation may therefore be inserted in two steps, and undo takes two steps to remove it. If you switch apps between the two, the rest is copied to the clipboard instead. If the app doesn't read the first part within 1 s, the whole dictation is copied instead (press ⌘V to paste it).
 - Words stay as ghost text, updated as you speak, until Caps Lock inserts them or Tab polishes and inserts them. Nothing is typed into the field before that.

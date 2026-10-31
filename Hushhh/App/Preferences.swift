@@ -78,6 +78,13 @@ final class Preferences: ObservableObject {
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: "playSounds") } }
     @Published var smartSpacing: Bool { didSet { defaults.set(smartSpacing, forKey: "smartSpacing") } }
     @Published var holdToTalk: Bool { didSet { defaults.set(holdToTalk, forKey: "holdToTalk") } }
+    /// Starts and finishes dictation. Caps Lock unless the person recorded another key.
+    @Published var dictationKey: DictationKey {
+        didSet {
+            if dictationKey.isCapsLock { defaults.removeObject(forKey: "dictationKey") }
+            else { defaults.set(try? JSONEncoder().encode(dictationKey), forKey: "dictationKey") }
+        }
+    }
     @Published var useGPU: Bool { didSet { defaults.set(useGPU, forKey: "useGPU") } }
     @Published var showHints: Bool { didSet { defaults.set(showHints, forKey: "showHints") } }
     /// Tab during dictation sends the text to Claude Haiku for clean-up.
@@ -116,6 +123,7 @@ final class Preferences: ObservableObject {
         playSounds = defaults.bool(forKey: "playSounds")
         smartSpacing = defaults.bool(forKey: "smartSpacing")
         holdToTalk = defaults.bool(forKey: "holdToTalk")
+        dictationKey = defaults.data(forKey: "dictationKey").flatMap { try? JSONDecoder().decode(DictationKey.self, from: $0) } ?? .capsLock
         useGPU = defaults.bool(forKey: "useGPU")
         showHints = defaults.bool(forKey: "showHints")
         // Settings from removed options; nothing reads them any more.

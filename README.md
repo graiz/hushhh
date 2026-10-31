@@ -25,7 +25,7 @@
 </p>
 
 > [!NOTE]
-> While Hushhh is running, **Caps Lock is used for dictation** instead of capitals. Quitting Hushhh gives it back.
+> While Hushhh is running, **Caps Lock is used for dictation** instead of capitals. Quitting Hushhh gives it back. To use another key, choose Record New Key… in Settings › General.
 
 ## Install
 
