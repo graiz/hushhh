@@ -10,8 +10,11 @@ enum MicrophoneChoice {
     static let ignoredSamples = 16_000 * 3 / 10
     /// How much speech the comparison covers.
     static let recentWindows = 8
-    /// Below this, a microphone hasn't heard anyone yet.
-    static let speechFloor: Float = 0.01
+    /// Below this, a microphone hasn't heard anyone yet (the same floor as `TranscriptTail`).
+    static let speechFloor: Float = 0.003
+    /// Below this, a microphone hears nothing at all, not even room noise: a virtual
+    /// device with nothing routed to it, or a muted one.
+    static let deadLevel: Float = 0.0001
     /// Another microphone must be this much louder than the default one to be chosen
     /// (about 3.5 dB), so the default wins near-ties.
     static let margin: Float = 1.5
@@ -48,23 +51,29 @@ enum MicrophoneChoice {
 
     struct Choice: Equatable {
         var index: Int
-        /// False when nobody spoke and the default was kept, so the choice says nothing
+        /// False when nobody spoke and the first was kept, so the choice says nothing
         /// about which microphone is best.
-        var heardSpeech: Bool
+        var isConfident: Bool
     }
 
     /// The microphone to keep, or nil to keep listening on all of them.
     /// - Parameters:
     ///   - meters: one per microphone, in order; index 0 is preferred in a near-tie.
     static func choose(_ meters: [Meter]) -> Choice? {
-        guard meters.count > 1 else { return meters.isEmpty ? nil : Choice(index: 0, heardSpeech: false) }
+        guard meters.count > 1 else { return meters.isEmpty ? nil : Choice(index: 0, isConfident: false) }
         let levels = meters.map { $0.recentRMS ?? 0 }
-        guard let loudest = levels.indices.max(by: { levels[$0] < levels[$1] }), levels[loudest] >= speechFloor else {
+        guard let loudest = levels.indices.max(by: { levels[$0] < levels[$1] }) else { return nil }
+        // A first microphone that hears nothing at all loses to any that hears the room,
+        // without waiting for speech.
+        if let first = meters[0].recentRMS, first < deadLevel, levels[loudest] >= deadLevel {
+            return Choice(index: loudest, isConfident: true)
+        }
+        guard levels[loudest] >= speechFloor else {
             // Nobody has spoken yet; after a while, settle on the first.
-            return meters[0].received >= giveUpSamples ? Choice(index: 0, heardSpeech: false) : nil
+            return meters[0].received >= giveUpSamples ? Choice(index: 0, isConfident: false) : nil
         }
         // A microphone still starting up (Bluetooth) can't be compared yet; the ones that
         // have heard speech decide.
-        return Choice(index: levels[loudest] >= levels[0] * margin ? loudest : 0, heardSpeech: true)
+        return Choice(index: levels[loudest] >= levels[0] * margin ? loudest : 0, isConfident: true)
     }
 }

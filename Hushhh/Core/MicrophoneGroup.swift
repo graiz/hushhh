@@ -97,6 +97,8 @@ final class MicrophoneGroup {
         guard let choice = MicrophoneChoice.choose(meters) else { lock.unlock(); return }
         let pick = choice.index
         chosen = pick
+        FocusLog.write("microphone chose \(pick) of \(devices.count) confident=\(choice.isConfident) levels="
+            + meters.map { String(format: "%.5f", $0.recentRMS ?? -1) }.joined(separator: ","))
         let heard = buffers[pick]
         buffers = []
         let others = recorders.filter { $0.key != pick }.map(\.value)

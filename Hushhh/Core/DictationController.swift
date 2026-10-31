@@ -115,12 +115,11 @@ final class DictationController: ObservableObject {
         }
         group.onChoice = { choice, devices in
             // A dictation with no speech says nothing about which microphone is best.
-            guard choice.heardSpeech, let setup = lock.withLock({ setup }) else { return }
+            guard choice.isConfident, let setup = lock.withLock({ setup }) else { return }
             let uid = devices[choice.index].flatMap { id in setup.others.first { $0.id == id }?.uid } ?? setup.defaultUID ?? ""
             DispatchQueue.main.async {
                 defaults.set(setup.key, forKey: Self.microphoneSetupKey)
                 defaults.set(uid, forKey: Self.microphoneChoiceKey)
-                FocusLog.write("microphone chose \(choice.index) of \(devices.count)")
             }
         }
         return group

@@ -9,7 +9,7 @@ final class MicrophoneChoiceTests: XCTestCase {
     }
 
     func testOneMicrophoneIsChosenAtOnce() {
-        XCTAssertEqual(MicrophoneChoice.choose([MicrophoneChoice.Meter()]), .init(index: 0, heardSpeech: false))
+        XCTAssertEqual(MicrophoneChoice.choose([MicrophoneChoice.Meter()]), .init(index: 0, isConfident: false))
     }
 
     func testWaitsUntilThereIsEnoughAudio() {
@@ -19,7 +19,7 @@ final class MicrophoneChoiceTests: XCTestCase {
     }
 
     func testClearlyLouderMicrophoneWins() {
-        XCTAssertEqual(MicrophoneChoice.choose([meter(0.02), meter(0.05), meter(0.03)]), .init(index: 1, heardSpeech: true))
+        XCTAssertEqual(MicrophoneChoice.choose([meter(0.02), meter(0.05), meter(0.03)]), .init(index: 1, isConfident: true))
     }
 
     func testDefaultWinsNearTies() {
@@ -27,11 +27,26 @@ final class MicrophoneChoiceTests: XCTestCase {
     }
 
     func testWaitsForSpeech() {
-        XCTAssertNil(MicrophoneChoice.choose([meter(0.001), meter(0.002)]))
+        XCTAssertNil(MicrophoneChoice.choose([meter(0.001), meter(0.0012)]))
+    }
+
+    func testSpeechAtTheFloorCounts() {
+        XCTAssertEqual(MicrophoneChoice.choose([meter(0.0008), meter(0.004)]), .init(index: 1, isConfident: true))
+    }
+
+    /// Measured: a virtual input with nothing routed to it (0.00001) beside a built-in
+    /// microphone hearing a quiet room (0.00075).
+    func testSilentDefaultLosesToOneHearingTheRoom() {
+        XCTAssertEqual(MicrophoneChoice.choose([meter(0.00001, seconds: 0.7), meter(0.00075, seconds: 0.7)]),
+                       .init(index: 1, isConfident: true))
+    }
+
+    func testSilentDefaultIsKeptWhenEveryMicrophoneIsSilent() {
+        XCTAssertNil(MicrophoneChoice.choose([meter(0.00001), meter(0.00002)]))
     }
 
     func testGivesUpOnTheDefaultWithoutSpeech() {
-        XCTAssertEqual(MicrophoneChoice.choose([meter(0.001, seconds: 3), meter(0.002, seconds: 3)]), .init(index: 0, heardSpeech: false))
+        XCTAssertEqual(MicrophoneChoice.choose([meter(0.001, seconds: 3), meter(0.0012, seconds: 3)]), .init(index: 0, isConfident: false))
     }
 
     func testKeyClickAtTheStartIsIgnored() {
