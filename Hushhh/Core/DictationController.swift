@@ -72,8 +72,11 @@ final class DictationController: ObservableObject {
 
         prefs.$showHints.sink { [weak self] in self?.overlay.model.showHint = $0 }.store(in: &cancellables)
         prefs.$dictationKey.sink { [weak self] in self?.overlay.model.keySymbol = $0.symbol }.store(in: &cancellables)
-        // A key recorded in Settings applies at once.
-        prefs.$dictationKey.dropFirst().removeDuplicates().sink { [weak self] in self?.useDictationKey($0) }.store(in: &cancellables)
+        // A key chosen in Settings applies at once, but after the change is stored: the
+        // publisher fires before it is, and changing the Caps Lock mapping waits on hidutil,
+        // which would let the Settings menu redraw with the old key.
+        prefs.$dictationKey.dropFirst().removeDuplicates().receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.useDictationKey($0) }.store(in: &cancellables)
     }
 
     // MARK: Lifecycle
