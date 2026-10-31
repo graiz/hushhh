@@ -88,6 +88,12 @@ struct GeneralSettings: View {
                 SettingsFooter("Press \(key) to start and again to insert; Esc cancels. With Hold to talk, hold \(key) while speaking and release it to insert.")
             }
 
+            Section {
+                Toggle("Find the best microphone", isOn: $prefs.listenOnAllMicrophones)
+            } footer: {
+                SettingsFooter("When your microphones change, Hushhh listens on all of them for a moment and remembers the one that hears you best. AirPods are included only while they’re playing your Mac’s sound. Otherwise Hushhh uses the input chosen in System Settings.")
+            }
+
             Section("Feedback") {
                 Toggle("Play sounds", isOn: $prefs.playSounds)
                 Toggle("Show keyboard hints while listening", isOn: $prefs.showHints)

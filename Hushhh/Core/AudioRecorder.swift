@@ -1,6 +1,8 @@
 import AVFoundation
+import CoreAudio
 
-/// Captures the default input device and delivers 16 kHz mono Float32 samples.
+/// Captures one input device (the system default unless given one) and delivers
+/// 16 kHz mono Float32 samples.
 final class AudioRecorder {
     enum RecorderError: LocalizedError {
         case noInputDevice
@@ -19,8 +21,19 @@ final class AudioRecorder {
                                              channels: 1,
                                              interleaved: false)!
 
+    private let device: AudioDeviceID?
+
+    init(device: AudioDeviceID? = nil) {
+        self.device = device
+    }
+
     func start() throws {
         let input = engine.inputNode
+        if var device, let unit = input.audioUnit {
+            guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                       &device, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr
+            else { throw RecorderError.noInputDevice }
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else { throw RecorderError.noInputDevice }
         converter = AVAudioConverter(from: format, to: targetFormat)

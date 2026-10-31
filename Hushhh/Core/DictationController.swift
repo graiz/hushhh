@@ -28,7 +28,7 @@ final class DictationController: ObservableObject {
     private var engineKey: String?
     private var engineLoad: Task<SpeechEngine, Error>?
 
-    private var recorder: AudioRecorder?
+    private var recorder: MicrophoneGroup?
     private var live: LiveTranscriber?
     private var focus: FocusContext?
     /// Inline ghost text placement for this session. The mode is decided once at
@@ -92,6 +92,41 @@ final class DictationController: ObservableObject {
         // caret at once; switch it off as Hushhh quits.
         FocusContext.releaseAccessibility()
     }
+
+    /// The microphones for this dictation. Hushhh listens on all of them only when the set
+    /// of microphones has changed since it last chose one; otherwise straight on the one
+    /// chosen then, so dictation starts at full speed.
+    private func microphones() -> MicrophoneGroup {
+        guard prefs.listenOnAllMicrophones else { return MicrophoneGroup { [nil] } }
+        let defaults = UserDefaults.standard
+        let (rememberedSetup, rememberedChoice) = (defaults.string(forKey: Self.microphoneSetupKey),
+                                                   defaults.string(forKey: Self.microphoneChoiceKey))
+        let lock = NSLock()
+        var setup: (defaultUID: String?, others: [AudioDevices.Microphone], key: String)?
+        let group = MicrophoneGroup {
+            let found = AudioDevices.setup()
+            lock.withLock { setup = found }
+            guard !found.others.isEmpty else { return [nil] }
+            if found.key == rememberedSetup, let rememberedChoice {
+                // The default input, or one of the others by its lasting ID.
+                return [found.others.first { $0.uid == rememberedChoice }?.id]
+            }
+            return [nil] + found.others.map(\.id)
+        }
+        group.onChoice = { choice, devices in
+            // A dictation with no speech says nothing about which microphone is best.
+            guard choice.heardSpeech, let setup = lock.withLock({ setup }) else { return }
+            let uid = devices[choice.index].flatMap { id in setup.others.first { $0.id == id }?.uid } ?? setup.defaultUID ?? ""
+            DispatchQueue.main.async {
+                defaults.set(setup.key, forKey: Self.microphoneSetupKey)
+                defaults.set(uid, forKey: Self.microphoneChoiceKey)
+                FocusLog.write("microphone chose \(choice.index) of \(devices.count)")
+            }
+        }
+        return group
+    }
+    private static let microphoneSetupKey = "microphoneSetup"
+    private static let microphoneChoiceKey = "microphoneChoice"
 
     /// Caps Lock is remapped only while it's the dictation key, so another key leaves it working as usual.
     private func useDictationKey(_ key: DictationKey) {
@@ -297,7 +332,7 @@ final class DictationController: ObservableObject {
             self.overlay.flash(symbol: "exclamationmark.triangle", text: error.localizedDescription, isError: true, duration: 3)
         }
 
-        let recorder = AudioRecorder()
+        let recorder = microphones()
         recorder.onSamples = { [weak live] samples in live?.append(samples, level: 0) }
         recorder.onLevel = { [weak self, weak live] level in
             live?.append([], level: level)
@@ -378,7 +413,7 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func microphoneStarted(recorder: AudioRecorder, live: LiveTranscriber,
+    private func microphoneStarted(recorder: MicrophoneGroup, live: LiveTranscriber,
                                    result: Result<Void, Error>, token: UUID, anchor: OverlayController.Anchor) {
         audioStartPending = false
         guard startToken == token, state == .starting else {

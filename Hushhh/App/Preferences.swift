@@ -78,6 +78,8 @@ final class Preferences: ObservableObject {
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: "playSounds") } }
     @Published var smartSpacing: Bool { didSet { defaults.set(smartSpacing, forKey: "smartSpacing") } }
     @Published var holdToTalk: Bool { didSet { defaults.set(holdToTalk, forKey: "holdToTalk") } }
+    /// Listen on every microphone when the set of microphones changes, and keep the one that hears best.
+    @Published var listenOnAllMicrophones: Bool { didSet { defaults.set(listenOnAllMicrophones, forKey: "listenOnAllMicrophones") } }
     /// Starts and finishes dictation. Caps Lock unless the person recorded another key.
     @Published var dictationKey: DictationKey {
         didSet {
@@ -111,6 +113,7 @@ final class Preferences: ObservableObject {
             "playSounds": true,
             "smartSpacing": true,
             "holdToTalk": false,
+            "listenOnAllMicrophones": true,
             "useGPU": true,
             "showHints": true,
             "polishWithClaude": false,
@@ -123,6 +126,7 @@ final class Preferences: ObservableObject {
         playSounds = defaults.bool(forKey: "playSounds")
         smartSpacing = defaults.bool(forKey: "smartSpacing")
         holdToTalk = defaults.bool(forKey: "holdToTalk")
+        listenOnAllMicrophones = defaults.bool(forKey: "listenOnAllMicrophones")
         dictationKey = defaults.data(forKey: "dictationKey").flatMap { try? JSONDecoder().decode(DictationKey.self, from: $0) } ?? .capsLock
         useGPU = defaults.bool(forKey: "useGPU")
         showHints = defaults.bool(forKey: "showHints")
