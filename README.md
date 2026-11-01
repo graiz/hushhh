@@ -37,6 +37,8 @@ Download the DMG from the [latest release](https://github.com/graiz/hushhh/relea
 2. Press **Caps Lock** and talk. Your words appear as you speak, in the document's own font, right after the cursor.
 3. Press **Caps Lock** again to insert them, **Tab** to tidy them up with a language model first (optional), or **Esc** to cancel.
 
+Names and jargon the speech model mishears, such as your company or product names, can be added in Settings › Typing › Custom Words. If a dictation didn't land where you meant, **Copy Last Dictation** in the menu bar copies it again.
+
 Hushhh lives in the menu bar. It works in native apps, browsers, Google Docs, Excel, Electron apps and terminals; where an app doesn't reveal its cursor, the text appears in a small bubble instead.
 
 ## Permissions
@@ -60,7 +62,7 @@ Both run on your Mac. Pick one in Settings › Models.
 ## Privacy
 
 - Your audio is processed on your Mac and never saved or sent anywhere.
-- Polish is off by default. If you turn it on, only the dictated text is sent, to the provider you choose (Claude Code, OpenAI, OpenRouter, or a local server).
+- Polish is off by default. If you turn it on, only the dictated text is sent, to the provider you choose (Claude Code, OpenAI, OpenRouter, or a local server), or kept on your Mac with Apple Intelligence.
 - No telemetry or analytics. Full details are in [PRIVACY.md](PRIVACY.md).
 
 ## Build from source

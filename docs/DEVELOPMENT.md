@@ -51,15 +51,17 @@ These only run when `HUSHHH_DEV=1` is set:
 
 ```bash
 APP=build/DerivedData/Build/Products/Debug/Hushhh.app/Contents/MacOS/Hushhh
-HUSHHH_DEV=1 $APP --transcribe speech.wav --engine qvac   # or whisper; add --download to fetch the model. Partials print as "settled | live"
+HUSHHH_DEV=1 $APP --transcribe speech.wav --engine qvac   # or whisper; add --download to fetch the model, --words "A,B" to use those custom words. Partials print as "settled | live"
 HUSHHH_DEV=1 $APP --demo-overlay                          # cycles the overlay through its states
-HUSHHH_DEV=1 $APP --polish "some dictated text"           # runs the configured polish provider
+HUSHHH_DEV=1 $APP --polish "some dictated text"           # runs the configured polish provider (--apple: Apple Intelligence; --words "A,B")
 HUSHHH_DEV=1 $APP --probe-focus out.log --bundle <id>     # logs what an app reports (includes the end of its text)
 HUSHHH_DEV=1 $APP --align-test --bundle <id> [--markers] --phase draw --no-move --ghost "words"
                                                           # draws red ghost text at that app's cursor (--hero: as users see it; --markers: use text markers, skip index lookups)
 ```
 
-To replay a dictation that came out wrong, have Hushhh keep the last 5 recordings with `defaults write com.graizlabs.hushhh keepRecentRecordings -bool true` (read at the start of each dictation; `-bool false` turns it off). Each one is saved at `~/Library/Logs/Hushhh/Recordings/<time>.wav`, readable only by you, next to a `.txt` with how the session ended (inserted, polished or cancelled) and its transcript. Pass the `.wav` to `--transcribe` to reproduce it.
+To replay a dictation that came out wrong, have Hushhh keep the last 200 recordings with `defaults write com.graizlabs.hushhh keepRecentRecordings -bool true` (read at the start of each dictation; `-bool false` turns it off). Each one is saved at `~/Library/Logs/Hushhh/Recordings/<time>.wav`, readable only by you, next to a `.txt` with how the session ended (inserted, polished or cancelled) and its transcript. Pass the `.wav` to `--transcribe` to reproduce it.
+
+To compare speech engines on these recordings, run `scripts/benchmark.py draft`, which lists new recordings in `~/Library/Logs/Hushhh/Benchmark/references.tsv` with what Hushhh inserted. Correct each row's text to what was really said and change its status from `draft` to `ok`. Then `scripts/benchmark.py run --show` transcribes the reviewed recordings with Hushhh's engines, Apple's SpeechTranscriber and Parakeet (through transcribe.cpp, downloaded on first use), and prints each engine's word error rate and mismatches. Results are cached, so later runs only transcribe new recordings.
 
 ## Placement overrides
 

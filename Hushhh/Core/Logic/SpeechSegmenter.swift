@@ -63,14 +63,47 @@ enum SpeechSegmenter {
 
     /// Two transcripts as one: a single space between them, and `next` lowercased when
     /// `settled` stops mid-sentence, since each segment is transcribed on its own and
-    /// starts with a capital. Punctuation is kept as transcribed.
+    /// starts with a capital. A full stop the engine put only where the segment was cut
+    /// is dropped (see `endsAtCut`); other punctuation is kept as transcribed.
     static func join(_ settled: String, _ next: String) -> String {
-        let settled = settled.trimmingCharacters(in: .whitespacesAndNewlines)
+        var settled = settled.trimmingCharacters(in: .whitespacesAndNewlines)
         let next = next.trimmingCharacters(in: .whitespacesAndNewlines)
         if settled.isEmpty { return next }
         if next.isEmpty { return settled }
+        if endsAtCut(settled, before: next) { settled = holdingBackStop(settled).text }
         return settled + continuation(next, after: settled)
     }
+
+    /// Whether the full stop or ellipsis ending `settled` marks only where the recording was
+    /// cut at a pause, not the end of a sentence: the engine ends every segment with one.
+    /// That shows when `next` starts in lowercase, as the engine heard it carry on, or when
+    /// the stop follows a word a sentence doesn't end on ("staring at.").
+    static func endsAtCut(_ settled: String, before next: String) -> Bool {
+        let held = holdingBackStop(settled)
+        guard !held.stop.isEmpty else { return false }
+        if let first = next.first(where: \.isLetter), first.isLowercase { return true }
+        let lastWord = held.text.split(whereSeparator: \.isWhitespace).last.map { $0.lowercased().filter(\.isLetter) } ?? ""
+        return unfinishedEndings.contains(lastWord)
+    }
+
+    /// `text` without a full stop or ellipsis at its end, and that stop. A dictation's first
+    /// part is pasted before the rest is known, so its stop waits until it's clear whether
+    /// a new sentence follows.
+    static func holdingBackStop(_ text: String) -> (text: String, stop: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for stop in ["...", "…", "."] where trimmed.hasSuffix(stop) {
+            return (String(trimmed.dropLast(stop.count)), stop)
+        }
+        return (trimmed, "")
+    }
+
+    /// English words a spoken sentence doesn't end on: articles, prepositions,
+    /// conjunctions and possessives. Words that can close a sentence ("that", "to", "in",
+    /// "her") aren't here.
+    private static let unfinishedEndings: Set<String> = [
+        "a", "an", "the", "of", "at", "from", "by", "into", "onto", "with", "for", "and", "or", "but", "nor",
+        "because", "than", "if", "my", "your", "our", "their", "its", "is", "are", "was", "were", "will", "would",
+    ]
 
     /// `next` as it follows `previous` in the same dictation: a leading space unless
     /// `previous` already ends in one or `next` starts with punctuation, and the

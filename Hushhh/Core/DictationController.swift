@@ -18,6 +18,9 @@ final class DictationController: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var engineState: EngineState = .needsModel
+    /// The text of the newest dictation, as inserted (polished, if it was). Kept in memory
+    /// only, so the menu bar can copy it again if it didn't land where the person meant.
+    @Published private(set) var lastDictation: String?
 
     private let prefs = Preferences.shared
     private let models = ModelStore.shared
@@ -316,7 +319,7 @@ final class DictationController: ObservableObject {
         }
         if case .failed = engineState { prepareEngine() }
 
-        let live = LiveTranscriber(engineProvider: { [weak self] in
+        let live = LiveTranscriber(customWords: CustomWords(prefs.customWords), engineProvider: { [weak self] in
             guard let self else { throw CancellationError() }
             return try await self.loadedEngine()
         })
@@ -453,7 +456,10 @@ final class DictationController: ObservableObject {
         Task {
             // Paste what's settled at once, so a long dictation lands without waiting.
             let settled = live.settledSnapshot()
-            let firstPaste = settled.text.isEmpty ? nil : self.firstPart(settled.text)
+            // A full stop ending the settled text may be only where a pause was cut, so it
+            // waits until the rest shows whether the sentence goes on.
+            let held = SpeechSegmenter.holdingBackStop(settled.text)
+            let firstPaste = held.text.isEmpty ? nil : self.firstPart(held.text)
             // Runs alongside the finish below; the second part waits for the app to read it.
             let firstInsert = firstPaste.map { text in
                 Task { await TextInserter.insertAndWait(text, method: self.prefs.insertion, restoringClipboard: false) }
@@ -471,10 +477,11 @@ final class DictationController: ObservableObject {
                 rest = await live.transcribeRest(after: settled.upTo)
             }
             self.live = nil
+            self.remember(SpeechSegmenter.join(settled.text, rest))
             RecentRecordings.save(live.recording(), transcript: SpeechSegmenter.join(settled.text, rest), outcome: "inserted")
             if let firstPaste, let firstInsert {
                 let first = await firstInsert.value
-                await self.finishContinuation(rest, after: firstPaste, first: first)
+                await self.finishContinuation(rest, after: firstPaste, heldStop: held.stop, first: first)
             } else {
                 self.finishSession(with: SpeechSegmenter.join(settled.text, rest))
             }
@@ -495,12 +502,13 @@ final class DictationController: ObservableObject {
     /// second paste could land before it, so the whole dictation is left on the clipboard
     /// instead (see `TwoStepFinish`). The session stays `.finishing` until the second part
     /// is in, so no new one starts mid-sequence.
-    private func finishContinuation(_ rest: String, after firstPaste: String, first: TextInserter.Inserted) async {
+    private func finishContinuation(_ rest: String, after firstPaste: String, heldStop: String,
+                                    first: TextInserter.Inserted) async {
         defer { state = .idle }
         // Read now, not at the 1 s timeout, so a read that came in since still gets the rest
         // pasted. A read arriving after the copy below is an accepted trade-off: the app then
         // pastes the whole dictation from the clipboard.
-        switch TwoStepFinish.decide(firstPaste: firstPaste, rest: rest, firstWasRead: first.wasRead) {
+        switch TwoStepFinish.decide(firstPaste: firstPaste, heldStop: heldStop, rest: rest, firstWasRead: first.wasRead) {
         case .restoreClipboard:
             TextInserter.restoreClipboard()
         case .copy(let text):
@@ -548,6 +556,7 @@ final class DictationController: ObservableObject {
             }
             do {
                 var polished = try await PolishService.current().polish(text)
+                self.remember(polished)
                 self.overlay.model.busyLabel = nil
                 self.state = .idle
                 self.overlay.hide()
@@ -577,6 +586,7 @@ final class DictationController: ObservableObject {
 
     private func finishSession(with text: String) {
         state = .idle
+        remember(text)
         guard !text.isEmpty else {
             overlay.flash(symbol: "waveform.slash", text: "No speech detected", duration: 1.2)
             return
@@ -598,6 +608,17 @@ final class DictationController: ObservableObject {
         let final = prefs.smartSpacing ? TextInserter.applySmartSpacing(text, after: focus.precedingCharacter) : text
         TextInserter.insert(final, method: prefs.insertion) { [weak self] in self?.flashCopiedDictation() }
         Sound.play(.insert)
+    }
+
+    /// Copies the newest dictation to the clipboard (menu bar).
+    func copyLastDictation() {
+        guard let lastDictation else { return }
+        TextInserter.copyToClipboard(lastDictation)
+    }
+
+    private func remember(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { lastDictation = text }
     }
 
     private func cancel() {

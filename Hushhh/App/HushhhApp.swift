@@ -78,7 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let start = Date()
                 do {
-                    let result = try await PolishService.current().polish(text)
+                    // --apple polishes with Apple Intelligence for this run, using --words if given.
+                    let words = Diagnostics.customWordsArgument() ?? Preferences.shared.customWords
+                    let polisher: TextPolisher = CommandLine.arguments.contains("--apple")
+                        ? AppleIntelligencePolisher(instructions: PolishPrompt.instructions(customWords: words))
+                        : try PolishService.current(customWords: words)
+                    let result = try await polisher.polish(text)
                     print(String(format: "polished in %.1fs:\n%@", Date().timeIntervalSince(start), result))
                 } catch {
                     print("polish failed (available=\(PolishService.isAvailable)): \(error.localizedDescription)")

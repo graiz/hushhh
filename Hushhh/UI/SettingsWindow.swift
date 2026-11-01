@@ -124,6 +124,7 @@ struct GeneralSettings: View {
 
 struct TypingSettings: View {
     @EnvironmentObject private var prefs: Preferences
+    @State private var customWords = ""
 
     var body: some View {
         Form {
@@ -140,7 +141,19 @@ struct TypingSettings: View {
                     : "Typing works in apps that block pasting, but is slower for long text.")
             }
 
+            Section {
+                TextEditor(text: $customWords)
+                    .font(.body)
+                    .frame(minHeight: 72)
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: customWords) { _, text in prefs.customWords = CustomWords.parse(text) }
+            } header: {
+                Text("Custom Words")
+            } footer: {
+                SettingsFooter("Names and terms to spell your way, one per line or separated by commas, such as Hushhh. When dictation hears something that looks or sounds close, it’s replaced, and Polish is asked to spell these terms as written.")
+            }
         }
+        .onAppear { customWords = prefs.customWords.joined(separator: "\n") }
         .formStyle(.grouped)
         .frame(width: 500)
         .fixedSize(horizontal: false, vertical: true)
@@ -396,6 +409,14 @@ struct PolishSettings: View {
                         Label("Use https:// — http:// is only allowed for a server on this Mac.", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.orange)
                     }
+                } else if prefs.polishProvider == .appleIntelligence {
+                    LabeledContent("Status") {
+                        if let reason = AppleIntelligencePolisher.unavailableReason {
+                            Label(reason, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        } else {
+                            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        }
+                    }
                 } else {
                     Picker("Model", selection: claudeModelChoice) {
                         ForEach(ClaudeModel.allCases) { model in
@@ -459,6 +480,8 @@ struct PolishSettings: View {
         switch prefs.polishProvider {
         case .claudeCode:
             "Runs Claude Code headless (claude -p) with your Claude Code login, no tools and no saved session. The text is sent to Anthropic."
+        case .appleIntelligence:
+            "Uses Apple’s on-device model. Your text never leaves this Mac. Needs macOS 26 with Apple Intelligence turned on."
         case .openAI:
             "Uses the OpenAI chat completions API. Your key is stored in the macOS Keychain. The text is sent to OpenAI."
         case .openRouter:

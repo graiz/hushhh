@@ -89,6 +89,8 @@ final class Preferences: ObservableObject {
     }
     @Published var useGPU: Bool { didSet { defaults.set(useGPU, forKey: "useGPU") } }
     @Published var showHints: Bool { didSet { defaults.set(showHints, forKey: "showHints") } }
+    /// Names and terms the speech model tends to mishear, spelled as they should appear.
+    @Published var customWords: [String] { didSet { defaults.set(customWords, forKey: "customWords") } }
     /// Tab during dictation sends the text to Claude Haiku for clean-up.
     @Published var polishEnabled: Bool { didSet { defaults.set(polishEnabled, forKey: "polishWithClaude") } }
     /// Which model cleans up text. Base URL and model are remembered per provider.
@@ -130,6 +132,7 @@ final class Preferences: ObservableObject {
         dictationKey = defaults.data(forKey: "dictationKey").flatMap { try? JSONDecoder().decode(DictationKey.self, from: $0) } ?? .capsLock
         useGPU = defaults.bool(forKey: "useGPU")
         showHints = defaults.bool(forKey: "showHints")
+        customWords = defaults.stringArray(forKey: "customWords") ?? []
         // Settings from removed options; nothing reads them any more.
         for stale in ["liveTyping", "commitDelay", "migratedGhostDefault", "preciseCursorExperimental"] { defaults.removeObject(forKey: stale) }
         // Polish sends text off the Mac, so new installs start with it off. Installs that

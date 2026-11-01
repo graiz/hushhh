@@ -6,6 +6,8 @@ import Foundation
 /// they stay fast however long the dictation runs.
 final class LiveTranscriber {
     private let engineProvider: () async throws -> SpeechEngine
+    /// The person's list of terms, applied to every pass.
+    private let customWords: CustomWords
     private let lock = NSLock()
     private var samples: [Float] = []
     private var peakLevel: Float = 0
@@ -49,7 +51,8 @@ final class LiveTranscriber {
     /// Below this, the recording is treated as silence (avoids hallucinated text).
     private static let silenceThreshold: Float = 0.02
 
-    init(engineProvider: @escaping () async throws -> SpeechEngine) {
+    init(customWords: CustomWords = CustomWords([]), engineProvider: @escaping () async throws -> SpeechEngine) {
+        self.customWords = customWords
         self.engineProvider = engineProvider
     }
 
@@ -147,7 +150,7 @@ final class LiveTranscriber {
                                                       speechPeakRMS: speechPeak) {
             let segment = audio[..<point]
             let silent = TranscriptTail.isSilent(segment, sampleRate: Self.sampleRate)
-            let pass = silent ? nil : await Self.transcribe(Array(segment), with: engine, padded: false,
+            let pass = silent ? nil : await self.transcribe(Array(segment), with: engine, padded: false,
                                                             speechPeak: speechPeak)
             let text = pass?.text ?? ""
             // Silence, a filler phrase or an empty pass from quiet audio, and a segment over
@@ -182,7 +185,7 @@ final class LiveTranscriber {
         let settled = lock.withLock { settledText }
         let long = audio.count >= Self.minSamples
         let live = long && !TranscriptTail.isSilent(audio[...], sampleRate: Self.sampleRate)
-            ? await Self.transcribe(audio, with: engine, padded: true, speechPeak: speechPeak).text : ""
+            ? await self.transcribe(audio, with: engine, padded: true, speechPeak: speechPeak).text : ""
         let text = SpeechSegmenter.join(settled, live)
         // Kept even when cancelled mid-pass, so the finish can use it. An engine can return
         // nothing when cancelled, so an empty cancelled pass doesn't count as covering the
@@ -234,7 +237,7 @@ final class LiveTranscriber {
         let (audio, _, peak, speechPeak) = region(from: from)
         guard let engine, peak >= Self.silenceThreshold, audio.count >= Self.minSamples,
               !TranscriptTail.isSilent(audio[...], sampleRate: Self.sampleRate) else { return settled }
-        let pass = await Self.transcribe(audio, with: engine, padded: true, speechPeak: speechPeak)
+        let pass = await self.transcribe(audio, with: engine, padded: true, speechPeak: speechPeak)
         return SpeechSegmenter.join(settled, pass.text)
     }
 
@@ -243,14 +246,16 @@ final class LiveTranscriber {
     /// audio is then transcribed as cleanly as one before a pause. Each pass's text is
     /// put in sentence case if it came back all in capitals. A filler phrase ("Thanks for
     /// watching.") from audio that is quiet by the relative rule is dropped, since nothing
-    /// was said there; louder audio keeps every word.
-    private static func transcribe(_ audio: [Float], with engine: SpeechEngine, padded: Bool,
-                                   speechPeak: Float) async -> (text: String, onlyNoise: Bool) {
-        let input = padded ? audio + [Float](repeating: 0, count: trailingSilence) : audio
+    /// was said there; louder audio keeps every word. Then misheard terms from the person's
+    /// list are corrected.
+    private func transcribe(_ audio: [Float], with engine: SpeechEngine, padded: Bool,
+                            speechPeak: Float) async -> (text: String, onlyNoise: Bool) {
+        let input = padded ? audio + [Float](repeating: 0, count: Self.trailingSilence) : audio
         let output = SpeechSegmenter.fixingAllCaps(await engine.transcribe(input))
-        let quiet = TranscriptTail.isQuiet(audio[...], sampleRate: sampleRate, speechPeakRMS: speechPeak)
+        let quiet = TranscriptTail.isQuiet(audio[...], sampleRate: Self.sampleRate, speechPeakRMS: speechPeak)
         // An empty pass over quiet audio counts too: there was only noise to transcribe.
-        return (SpeechSegmenter.kept(output, regionIsQuiet: quiet), quiet && SpeechSegmenter.isFiller(output))
+        return (customWords.correct(SpeechSegmenter.kept(output, regionIsQuiet: quiet)),
+                quiet && SpeechSegmenter.isFiller(output))
     }
     private static let trailingSilence = sampleRate * 2 / 5
 

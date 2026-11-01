@@ -18,6 +18,9 @@ struct MenuBarContent: View {
         }
         .disabled(dictation.state == .finishing || dictation.state == .starting)
 
+        Button("Copy Last Dictation") { dictation.copyLastDictation() }
+            .disabled(dictation.lastDictation == nil)
+
         Divider()
 
         Picker("Speech Engine", selection: $prefs.engine) {

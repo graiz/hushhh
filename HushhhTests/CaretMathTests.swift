@@ -24,4 +24,20 @@ final class CaretMathTests: XCTestCase {
         let font = NSFont(name: "Helvetica", size: 13)!
         XCTAssertEqual(CaretMath.caretX(lineStartX: 50, prefix: String(repeating: "W", count: 200), font: font, limit: 300), 300)
     }
+
+    func testCaretOnAnEmptyLastLineIsMovedBelowTheLineBreak() {
+        // TextEdit at the end of a document that ends in a line break: the zero-length box
+        // has the right x but sits on the line of the line break before it (Accessibility
+        // coordinates, y grows downward).
+        let lineBreak = CGRect(x: 595, y: 352, width: 138, height: 29)
+        let zero = CGRect(x: 157, y: 352, width: 0, height: 29)
+        XCTAssertEqual(CaretMath.caretAfterLineBreak(zeroLength: zero, lineBreak: lineBreak),
+                       CGRect(x: 157, y: 381, width: 0, height: 29))
+    }
+    func testCaretAlreadyBelowTheLineBreakIsKept() {
+        let lineBreak = CGRect(x: 595, y: 352, width: 138, height: 29)
+        let zero = CGRect(x: 157, y: 381, width: 0, height: 29)
+        XCTAssertEqual(CaretMath.caretAfterLineBreak(zeroLength: zero, lineBreak: lineBreak), zero)
+        XCTAssertEqual(CaretMath.caretAfterLineBreak(zeroLength: zero, lineBreak: nil), zero)
+    }
 }

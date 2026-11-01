@@ -35,11 +35,50 @@ enum TranscriptTail {
         !hasWindow(in: samples, atLeast: silenceFloor, windowSize: windowSize(sampleRate: sampleRate))
     }
 
-    /// Whether no 50 ms window of `samples` reaches the relative quiet threshold: room
-    /// noise at most, by this session's speech level. Used only to judge filler phrases.
+    /// Whether `samples` holds no speech, by this session's speech level: no stretch of it
+    /// 200 ms long is voiced, in 20 ms frames over the relative quiet threshold with under
+    /// 2,000 zero crossings a second (as vowels are; clicks, taps and breath noise cross far
+    /// more often). Gaps of up to 60 ms, like the stop in "thank you", don't break a stretch.
+    /// A spoken phrase, even "Thanks", is one such stretch; the key click that ends a
+    /// dictation, and the taps and breaths scattered through a pause, are not. For a soft
+    /// speaker the threshold is near the floor, so loudness alone would count those as sound.
+    /// Used only to judge filler phrases.
     static func isQuiet(_ samples: ArraySlice<Float>, sampleRate: Int, speechPeakRMS: Float) -> Bool {
-        !hasWindow(in: samples, atLeast: quietThreshold(speechPeakRMS: speechPeakRMS),
-                   windowSize: windowSize(sampleRate: sampleRate))
+        let threshold = quietThreshold(speechPeakRMS: speechPeakRMS)
+        let frame = sampleRate / 50
+        guard frame > 1 else { return true }
+        let maxCrossings = 2_000 * frame / sampleRate
+        var stretchStart: Int?, lastVoiced = 0, index = 0
+        var start = samples.startIndex
+        while start + frame <= samples.endIndex {
+            let window = samples[start..<start + frame]
+            if rms(window) >= threshold, crossings(window) < maxCrossings {
+                if let first = stretchStart, index - lastVoiced <= maxGapFrames + 1 {
+                    if index - first + 1 >= minVoicedFrames { return false }
+                } else {
+                    stretchStart = index
+                }
+                lastVoiced = index
+            }
+            start += frame
+            index += 1
+        }
+        return true
+    }
+    /// 200 ms of 20 ms frames.
+    private static let minVoicedFrames = 10
+    /// 60 ms.
+    private static let maxGapFrames = 3
+
+    /// How many times `window` changes sign.
+    private static func crossings(_ window: ArraySlice<Float>) -> Int {
+        var count = 0
+        var previous = window.first ?? 0
+        for s in window.dropFirst() {
+            if (s < 0) != (previous < 0) { count += 1 }
+            previous = s
+        }
+        return count
     }
 
     /// The root mean square of one window of audio.

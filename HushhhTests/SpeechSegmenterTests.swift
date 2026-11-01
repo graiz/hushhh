@@ -112,10 +112,31 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(SpeechSegmenter.join("Then", "It works."), "Then it works.")
     }
 
-    func testJoinKeepsTheEnginesPunctuation() {
-        XCTAssertEqual(SpeechSegmenter.join("Here is the second sentence.", "which keeps going."),
-                       "Here is the second sentence. which keeps going.")
-        XCTAssertEqual(SpeechSegmenter.join("Wait...", "then go."), "Wait... then go.")
+    func testJoinKeepsRealSentenceEnds() {
+        XCTAssertEqual(SpeechSegmenter.join("It tries to match the font.", "That helps."),
+                       "It tries to match the font. That helps.")
+        XCTAssertEqual(SpeechSegmenter.join("Is it on?", "yes it is."), "Is it on? yes it is.")
+        XCTAssertEqual(SpeechSegmenter.join("Wait!", "then go."), "Wait! then go.")
+    }
+
+    func testJoinDropsAStopWhereTheNextSegmentCarriesOn() {
+        // A segment ends at a pause, and the engine ends it with a full stop. A next segment
+        // that starts in lowercase shows the sentence went on.
+        XCTAssertEqual(SpeechSegmenter.join("It tries to match the font.", "so that when you finish"),
+                       "It tries to match the font so that when you finish")
+        XCTAssertEqual(SpeechSegmenter.join("Or if you want to hit escape.", "which would clear the text."),
+                       "Or if you want to hit escape which would clear the text.")
+        XCTAssertEqual(SpeechSegmenter.join("It gives you a...", "view of what things will look like."),
+                       "It gives you a view of what things will look like.")
+        XCTAssertEqual(SpeechSegmenter.join("Wait…", "then go."), "Wait then go.")
+    }
+
+    func testJoinDropsAStopAfterAWordThatCantEndASentence() {
+        XCTAssertEqual(SpeechSegmenter.join("So you're not just staring at.", "Talking bubble."),
+                       "So you're not just staring at talking bubble.")
+        XCTAssertEqual(SpeechSegmenter.join("The last couple runs of.", "The Cadence application."),
+                       "The last couple runs of the Cadence application.")
+        XCTAssertEqual(SpeechSegmenter.join("It was the.", "I think."), "It was the I think.")
     }
 
     func testJoinWithAnEmptySide() {
@@ -223,11 +244,41 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(SpeechSegmenter.kept("Call me later.", regionIsQuiet: true), "Call me later.")
     }
 
+    /// A voiced sound, like a vowel: a 150 Hz sine.
+    private func voice(_ seconds: Double, _ amplitude: Float) -> [Float] {
+        (0..<Int(seconds * Double(rate))).map { amplitude * sin(2 * .pi * 150 * Float($0) / Float(rate)) }
+    }
+
+    private func quiet(_ audio: [Float], peak: Float = 0.1) -> Bool {
+        TranscriptTail.isQuiet(audio[...], sampleRate: rate, speechPeakRMS: peak)
+    }
+
     func testQuietByTheRelativeRule() {
         // Room noise above the floor, but far under the speech level.
-        XCTAssertTrue(TranscriptTail.isQuiet(tone(1, 0.006)[...], sampleRate: rate, speechPeakRMS: 0.1))
-        XCTAssertFalse(TranscriptTail.isQuiet((tone(0.5, 0) + tone(0.1, 0.05))[...], sampleRate: rate,
-                                              speechPeakRMS: 0.1))
-        XCTAssertTrue(TranscriptTail.isQuiet([Float]()[...], sampleRate: rate, speechPeakRMS: 0.1))
+        XCTAssertTrue(quiet(voice(1, 0.006)))
+        // Half a second of voice at speech level is speech.
+        XCTAssertFalse(quiet(tone(0.5, 0) + voice(0.5, 0.05)))
+        XCTAssertTrue(quiet([]))
+    }
+
+    func testKeyClickAtTheEndIsStillQuiet() {
+        // The key that finishes a dictation clicks for about 30 ms, after seconds of silence.
+        let quiet = quiet(tone(3, 0.0008) + tone(0.03, 0.04), peak: 0.026)
+        XCTAssertTrue(quiet)
+        // So "Thank you." made up from it is dropped.
+        XCTAssertEqual(SpeechSegmenter.kept("Thank you.", regionIsQuiet: quiet), "")
+    }
+
+    func testTapsAndBreathsInAPauseAreQuiet() {
+        // A soft speaker (peak 0.02) pausing: taps and clicks as loud as speech, and short
+        // voiced bits, but under 200 ms of voice in all. The engine hears "Thank you." there.
+        var pause = tone(0.5, 0.0006)
+        for _ in 0..<4 { pause += tone(0.06, 0.04) + voice(0.04, 0.03) + tone(0.4, 0.0006) }
+        XCTAssertTrue(quiet(pause, peak: 0.02))
+    }
+
+    func testAShortPhraseIsSpeech() {
+        // "Thank you", softly: about 400 ms of voice.
+        XCTAssertFalse(quiet(tone(1, 0.0006) + voice(0.4, 0.01) + tone(1, 0.0006), peak: 0.02))
     }
 }

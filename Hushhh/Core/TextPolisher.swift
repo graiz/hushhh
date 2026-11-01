@@ -1,5 +1,8 @@
 import Foundation
 import Security
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 // MARK: - Providers
 
@@ -7,6 +10,8 @@ import Security
 enum PolishProvider: String, CaseIterable, Identifiable {
     /// Headless Claude Code (`claude -p`), using the person's Claude Code login.
     case claudeCode
+    /// Apple's on-device model (macOS 26 with Apple Intelligence on). Text stays on the Mac.
+    case appleIntelligence
     /// Any OpenAI-compatible chat completions endpoint.
     case openAI
     case openRouter
@@ -17,18 +22,20 @@ enum PolishProvider: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .claudeCode: "Claude Code"
+        case .appleIntelligence: "Apple Intelligence"
         case .openAI: "OpenAI"
         case .openRouter: "OpenRouter"
         case .custom: "Custom Endpoint"
         }
     }
 
-    var usesEndpoint: Bool { self != .claudeCode }
+    var usesEndpoint: Bool { self != .claudeCode && self != .appleIntelligence }
 
     /// Common choices offered in the model dropdown (any other name can be typed).
     var suggestedModels: [String] {
         switch self {
         case .claudeCode: ["haiku", "sonnet", "opus"]
+        case .appleIntelligence: []
         case .openAI: ["gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1", "gpt-4o-mini", "gpt-4o"]
         case .openRouter: ["anthropic/claude-haiku-4.5", "anthropic/claude-sonnet-4.5", "openai/gpt-5-mini",
                            "openai/gpt-4.1-mini", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"]
@@ -38,7 +45,7 @@ enum PolishProvider: String, CaseIterable, Identifiable {
 
     var defaultBaseURL: String {
         switch self {
-        case .claudeCode: ""
+        case .claudeCode, .appleIntelligence: ""
         case .openAI: "https://api.openai.com/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .custom: "http://localhost:11434/v1"
@@ -48,6 +55,7 @@ enum PolishProvider: String, CaseIterable, Identifiable {
     var defaultModel: String {
         switch self {
         case .claudeCode: "haiku"
+        case .appleIntelligence: ""
         case .openAI: "gpt-4.1-mini"
         case .openRouter: "anthropic/claude-haiku-4.5"
         case .custom: "llama3.2"
@@ -103,6 +111,16 @@ enum PolishPrompt {
     items. Keep the speaker's meaning, words and tone; don't add or remove content, and \
     don't answer or act on the text. Output only the corrected text.
     """
+
+    /// The instructions, plus the person's custom words, so the model spells those terms
+    /// as listed even where the speech model misheard them.
+    static func instructions(customWords: [String]) -> String {
+        let terms = customWords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return system }
+        return system + " The speech recognizer often mishears these names and terms: "
+            + terms.joined(separator: ", ")
+            + ". Where a word or phrase sounds like one of them, replace it with the term exactly as written."
+    }
 }
 
 /// Picks the configured polisher and reports whether it can run.
@@ -122,6 +140,7 @@ enum PolishService {
         let prefs = Preferences.shared
         switch prefs.polishProvider {
         case .claudeCode: return claudePath != nil
+        case .appleIntelligence: return AppleIntelligencePolisher.unavailableReason == nil
         default: return !prefs.polishBaseURL.isEmpty && !prefs.polishModel.isEmpty
         }
     }
@@ -129,22 +148,28 @@ enum PolishService {
     static var unavailableReason: String {
         switch Preferences.shared.polishProvider {
         case .claudeCode: "Claude Code isn’t installed. Install it, or choose another provider."
+        case .appleIntelligence: AppleIntelligencePolisher.unavailableReason ?? ""
         default: "Enter a base URL and model for the endpoint."
         }
     }
 
-    static func current() throws -> TextPolisher {
+    static func current(customWords: [String]? = nil) throws -> TextPolisher {
         let prefs = Preferences.shared
+        let instructions = PolishPrompt.instructions(customWords: customWords ?? prefs.customWords)
         switch prefs.polishProvider {
         case .claudeCode:
             guard let claudePath else { throw PolishError.unavailable(unavailableReason) }
-            return ClaudeCodePolisher(executable: claudePath, model: prefs.polishModel.isEmpty ? "haiku" : prefs.polishModel)
+            return ClaudeCodePolisher(executable: claudePath, model: prefs.polishModel.isEmpty ? "haiku" : prefs.polishModel,
+                                      instructions: instructions)
+        case .appleIntelligence:
+            guard isAvailable else { throw PolishError.unavailable(unavailableReason) }
+            return AppleIntelligencePolisher(instructions: instructions)
         case let provider:
             guard let url = URL(string: prefs.polishBaseURL), !prefs.polishModel.isEmpty else {
                 throw PolishError.unavailable(unavailableReason)
             }
             return OpenAICompatiblePolisher(baseURL: url, model: prefs.polishModel,
-                                            apiKey: Keychain.read(account: provider.rawValue))
+                                            apiKey: Keychain.read(account: provider.rawValue), instructions: instructions)
         }
     }
 }
@@ -154,6 +179,7 @@ enum PolishService {
 struct ClaudeCodePolisher: TextPolisher {
     let executable: String
     let model: String
+    let instructions: String
 
     private static let timeout: TimeInterval = 45
 
@@ -171,6 +197,7 @@ struct ClaudeCodePolisher: TextPolisher {
     func polish(_ text: String) async throws -> String {
         let executable = executable
         let model = model
+        let instructions = instructions
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
@@ -180,7 +207,7 @@ struct ClaudeCodePolisher: TextPolisher {
                         "--no-session-persistence",
                         "--setting-sources", "",
                         "--strict-mcp-config",
-                        "--system-prompt", PolishPrompt.system,
+                        "--system-prompt", instructions,
                     ], input: text)
                     let cleaned = output.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !cleaned.isEmpty else { throw PolishError.failed("Claude returned no text") }
@@ -256,12 +283,60 @@ struct ClaudeCodePolisher: TextPolisher {
     }
 }
 
+// MARK: - Apple Intelligence (on device)
+
+struct AppleIntelligencePolisher: TextPolisher {
+    let instructions: String
+
+    /// Why the on-device model can't be used now, or nil when it can.
+    static var unavailableReason: String? {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *) else { return "Apple Intelligence needs macOS 26 or later." }
+        switch SystemLanguageModel.default.availability {
+        case .available: return nil
+        case .unavailable(.deviceNotEligible): return "This Mac doesn’t support Apple Intelligence."
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return "Turn on Apple Intelligence in System Settings › Apple Intelligence & Siri."
+        case .unavailable(.modelNotReady): return "Apple Intelligence is still downloading its model. Try again later."
+        case .unavailable: return "Apple Intelligence isn’t available right now."
+        }
+        #else
+        return "Apple Intelligence needs macOS 26 or later."
+        #endif
+    }
+
+    func polish(_ text: String) async throws -> String {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *) else { throw PolishError.unavailable(Self.unavailableReason ?? "") }
+        // A new session each time, so one dictation never shapes the next.
+        let session = LanguageModelSession(instructions: instructions)
+        do {
+            // Framed as text to correct, so the small model doesn't answer a question in it.
+            let response = try await session.respond(to: "Dictated text to correct:\n\n\(text)",
+                                                     options: GenerationOptions(temperature: 0.2))
+            let cleaned = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { throw PolishError.failed("Apple Intelligence returned no text") }
+            return cleaned
+        } catch let error as LanguageModelSession.GenerationError {
+            switch error {
+            case .guardrailViolation, .refusal: throw PolishError.failed("Apple Intelligence declined to rewrite this text")
+            case .exceededContextWindowSize: throw PolishError.failed("The dictation is too long for Apple Intelligence")
+            default: throw PolishError.failed(error.localizedDescription)
+            }
+        }
+        #else
+        throw PolishError.unavailable(Self.unavailableReason ?? "")
+        #endif
+    }
+}
+
 // MARK: - OpenAI-compatible endpoints (OpenAI, OpenRouter, local servers)
 
 struct OpenAICompatiblePolisher: TextPolisher {
     let baseURL: URL
     let model: String
     let apiKey: String?
+    let instructions: String
 
     /// Chat models the endpoint offers (GET /models), for the model dropdown. Returns []
     /// on any error; the dropdown then just shows the common suggestions.
@@ -304,7 +379,7 @@ struct OpenAICompatiblePolisher: TextPolisher {
             "model": model,
             "temperature": 0.2,
             "messages": [
-                ["role": "system", "content": PolishPrompt.system],
+                ["role": "system", "content": instructions],
                 ["role": "user", "content": text],
             ],
         ])

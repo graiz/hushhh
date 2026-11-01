@@ -1,19 +1,33 @@
 import AVFoundation
 import AppKit
 
-/// `Hushhh --transcribe file.wav [--engine qvac|whisper] [--download]`
+/// `Hushhh --transcribe file.wav [--engine qvac|whisper] [--whisper-model <id>] [--download] [--words "A,B"] [--whole]`
 /// Runs the selected engine over a file through the same live pipeline
 /// used for dictation, prints partials and the final text, then quits.
 enum Diagnostics {
+    /// `--words "A,B"`: custom words for this run instead of the saved ones.
+    static func customWordsArgument() -> [String]? {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--words"), i + 1 < args.count else { return nil }
+        return CustomWords.parse(args[i + 1])
+    }
+
     static func transcribe(file: String) {
         Task { @MainActor in
             let args = CommandLine.arguments
             let prefs = Preferences.shared
-            if let i = args.firstIndex(of: "--engine"), i + 1 < args.count, let kind = EngineKind(rawValue: args[i + 1]) {
-                prefs.engine = kind
+            // Chosen for this run only: setting `prefs.engine` would save it as the app's engine.
+            var kind = prefs.engine
+            if let i = args.firstIndex(of: "--engine"), i + 1 < args.count, let chosen = EngineKind(rawValue: args[i + 1]) {
+                kind = chosen
             }
             let store = ModelStore.shared
-            let id: ModelID = prefs.engine == .qvac ? .qvac : .whisper(prefs.whisperModel)
+            var whisperModel = prefs.whisperModel
+            if let i = args.firstIndex(of: "--whisper-model"), i + 1 < args.count,
+               let chosen = WhisperModel(rawValue: args[i + 1]) {
+                whisperModel = chosen
+            }
+            let id: ModelID = kind == .qvac ? .qvac : .whisper(whisperModel)
             if !store.isInstalled(id), args.contains("--download") {
                 print("Downloading \(id)…")
                 store.download(id)
@@ -22,11 +36,11 @@ enum Diagnostics {
             }
 
             let engine: SpeechEngine
-            switch prefs.engine {
+            switch kind {
             case .qvac: engine = QVACEngine(modelURL: ModelStore.qvacModelURL, useGPU: prefs.useGPU)
             case .whisper:
-                guard let folder = store.whisperFolder(prefs.whisperModel) else { print("Model not installed"); exit(1) }
-                engine = WhisperEngine(model: prefs.whisperModel, folder: folder)
+                guard let folder = store.whisperFolder(whisperModel) else { print("Model not installed"); exit(1) }
+                engine = WhisperEngine(model: whisperModel, folder: folder)
             }
 
             let start = Date()
@@ -34,7 +48,16 @@ enum Diagnostics {
             print(String(format: "Loaded %@ in %.2fs", engine.displayName, Date().timeIntervalSince(start)))
 
             guard let samples = loadSamples(file) else { print("Couldn’t read \(file)"); exit(1) }
-            let live = LiveTranscriber(engineProvider: { engine })
+            if args.contains("--whole") {
+                // One pass over the whole file, to compare engines quickly (scripts/benchmark.py).
+                let t = Date()
+                let text = await engine.transcribe(samples)
+                print(String(format: "final (%.2fs for %.1fs of audio): %@", Date().timeIntervalSince(t),
+                             Double(samples.count) / Double(LiveTranscriber.sampleRate), text))
+                exit(0)
+            }
+            let live = LiveTranscriber(customWords: CustomWords(customWordsArgument() ?? prefs.customWords),
+                                       engineProvider: { engine })
             let began = Date()
             live.onSettle = { text, end in
                 let t = String(format: "%5.1fs", Date().timeIntervalSince(began))

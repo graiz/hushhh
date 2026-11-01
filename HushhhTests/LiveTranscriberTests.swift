@@ -6,8 +6,9 @@ final class LiveTranscriberTests: XCTestCase {
     private let rate = LiveTranscriber.sampleRate
 
     private func tone(_ seconds: Double, _ amplitude: Float) -> [Float] {
-        // Alternating sign, so the RMS of any window is exactly `amplitude`.
-        (0..<Int(seconds * Double(rate))).map { $0 % 2 == 0 ? amplitude : -amplitude }
+        // A 160 Hz square wave: the RMS of any window is exactly `amplitude`, and it's voiced
+        // like speech (few zero crossings), so it isn't mistaken for clicks.
+        (0..<Int(seconds * Double(rate))).map { ($0 / 50) % 2 == 0 ? amplitude : -amplitude }
     }
     private func word(_ name: String, _ seconds: Double = 1) -> [Float] {
         tone(seconds, FakeEngine.amplitudes[name]!)

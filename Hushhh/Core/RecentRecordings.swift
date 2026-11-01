@@ -7,7 +7,8 @@ import AVFoundation
 enum RecentRecordings {
     /// Read on the main thread when a session starts.
     nonisolated(unsafe) static var isEnabled = false
-    static let keep = 5
+    /// About 32 KB per second of audio, so 200 typical dictations take under 100 MB.
+    static let keep = 200
 
     static let directory: URL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Logs/Hushhh/Recordings", isDirectory: true)

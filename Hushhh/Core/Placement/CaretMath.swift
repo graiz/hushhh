@@ -15,4 +15,14 @@ enum CaretMath {
     static func caretX(lineStartX: CGFloat, prefix: String, font: NSFont, limit: CGFloat) -> CGFloat {
         min(lineStartX + (prefix as NSString).size(withAttributes: [.font: font]).width, limit)
     }
+
+    /// The caret right after a line break, from its zero-length box and the line break's box
+    /// (Accessibility coordinates). With no character after the caret, as at the end of a
+    /// document, TextEdit reports the zero-length box on the line break's line; the caret
+    /// can't be on that line, so it moves one line down.
+    static func caretAfterLineBreak(zeroLength: CGRect, lineBreak: CGRect?) -> CGRect {
+        guard let lineBreak, lineBreak.height > 1,
+              abs(zeroLength.midY - lineBreak.midY) < lineBreak.height * 0.5 else { return zeroLength }
+        return zeroLength.offsetBy(dx: 0, dy: lineBreak.maxY - zeroLength.minY)
+    }
 }

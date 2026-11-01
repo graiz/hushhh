@@ -12,10 +12,20 @@ enum TwoStepFinish: Equatable {
     /// The app hasn't read an unread first paste, so a second paste could land before it:
     /// the whole dictation (or the first part alone, with nothing after it) goes on the
     /// clipboard instead, so a late read or the person's Cmd-V inserts all of it.
-    static func decide(firstPaste: String, rest: String, firstWasRead: Bool) -> TwoStepFinish {
+    /// `heldStop` is the full stop held back from the end of the first part
+    /// (`SpeechSegmenter.holdingBackStop`): it goes in before a new sentence or at the end,
+    /// and is dropped where the rest carries the sentence on.
+    static func decide(firstPaste: String, heldStop: String = "", rest: String, firstWasRead: Bool) -> TwoStepFinish {
         let rest = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-        let continuation = rest.isEmpty ? "" : SpeechSegmenter.continuation(rest, after: firstPaste)
+        let continuation: String
+        if rest.isEmpty {
+            continuation = heldStop
+        } else if SpeechSegmenter.endsAtCut(firstPaste + heldStop, before: rest) {
+            continuation = SpeechSegmenter.continuation(rest, after: firstPaste)
+        } else {
+            continuation = heldStop + SpeechSegmenter.continuation(rest, after: firstPaste + heldStop)
+        }
         guard firstWasRead else { return .copy(firstPaste + continuation) }
-        return rest.isEmpty ? .restoreClipboard : .pasteRest(continuation)
+        return continuation.isEmpty ? .restoreClipboard : .pasteRest(continuation)
     }
 }

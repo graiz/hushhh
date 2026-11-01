@@ -1006,7 +1006,11 @@ struct FocusContext {
                next.height > 1, next.width > 0, next.origin != .zero {
                 return toCocoa(CGRect(x: next.minX, y: next.minY, width: 1, height: next.height))
             }
-            return zero.map(toCocoa)
+            // Nothing follows (an empty last line): the zero-length rect may be on the line
+            // break's line, so place it below that.
+            guard let zero, range.location > 0 else { return zero.map(toCocoa) }
+            let lineBreak = bounds(element, for: CFRange(location: range.location - 1, length: 1))
+            return toCocoa(CaretMath.caretAfterLineBreak(zeroLength: zero, lineBreak: lineBreak))
         }
         if let previous = bounds(element, for: CFRange(location: range.location - 1, length: 1)),
            previous.height > 1, previous.origin != .zero {
