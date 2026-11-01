@@ -150,7 +150,7 @@ struct TypingSettings: View {
             } header: {
                 Text("Custom Words")
             } footer: {
-                SettingsFooter("Names and terms to spell your way, one per line or separated by commas, such as Hushhh. When dictation hears something that looks or sounds close, it’s replaced, and Polish is asked to spell these terms as written.")
+                SettingsFooter("Names, terms and acronyms to spell your way, one per line or separated by commas, such as Hushhh or NASA. When dictation hears something that looks or sounds close, it’s replaced, and Polish is asked to spell these terms as written.")
             }
         }
         .onAppear { customWords = prefs.customWords.joined(separator: "\n") }

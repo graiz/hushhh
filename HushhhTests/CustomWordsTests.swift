@@ -29,6 +29,11 @@ final class CustomWordsTests: XCTestCase {
         XCTAssertEqual(correct("Kubernetis runs it.", ["kubernetes"]), "Kubernetes runs it.")
     }
 
+    func testAcronymsComeBackInCapitals() {
+        XCTAssertEqual(correct("Talk to the fbi", ["FBI"]), "Talk to the FBI")
+        XCTAssertEqual(correct("Nasa data", ["NASA"]), "NASA data")
+    }
+
     func testAmpersandTerms() {
         XCTAssertEqual(correct("send it to RD for review", ["R&D"]), "send it to R&D for review")
         XCTAssertEqual(correct("send it to R and D for review", ["R&D"]), "send it to R&D for review")

@@ -176,11 +176,19 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(SpeechSegmenter.fixingAllCaps(""), "")
     }
 
-    func testShortAllCapsWordsInAShortTranscriptAreKept() {
-        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("FBI CIA"), "FBI CIA")
-        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("OK"), "OK")
-        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("OK, NASA."), "OK, NASA.")
+    func testAShortAllCapsSegmentIsOrdinaryWords() {
+        // The engine sometimes returns a short segment in capitals; its words are ordinary.
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("THE NEW HUSH"), "The new hush")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("AS YOU'RE SPEAKING"), "As you're speaking")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("YES LET'S"), "Yes let's")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("PROGRAM"), "Program")
+        // Acronyms the person uses come back through Custom Words.
         XCTAssertEqual(SpeechSegmenter.fixingAllCaps("TALK TO THE FBI"), "Talk to the fbi")
+    }
+
+    func testASingleShortAllCapsWordIsKept() {
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("OK"), "OK")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("FBI."), "FBI.")
     }
 
     // MARK: robust peak and silence

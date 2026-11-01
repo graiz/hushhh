@@ -120,17 +120,18 @@ enum SpeechSegmenter {
     }
 
     /// `text` in sentence case when it is all in capitals, so a short segment reads like
-    /// the rest of the dictation. A transcript of up to 3 words keeps its 2–4 letter
-    /// words as they are, since those are likely acronyms ("FBI CIA", "OK").
+    /// the rest of the dictation: the engine returns some short segments in capitals, and
+    /// their words are ordinary ones ("THE NEW HUSH"). Only a lone 2–4 letter word is kept,
+    /// as it's likely an acronym ("OK", "FBI"); acronyms in longer segments come back
+    /// through Custom Words.
     static func fixingAllCaps(_ text: String) -> String {
         let lettered = text.split(whereSeparator: \.isWhitespace).filter { $0.contains(where: \.isLetter) }
         guard !text.contains(where: \.isLowercase) else { return text }
-        let keepsShortWords = lettered.count <= 3
         var startsSentence = true
         let words = text.split(separator: " ", omittingEmptySubsequences: false).map { part -> String in
             let letters = part.filter(\.isLetter)
             var word: String
-            if lettered.count == 1 || (keepsShortWords && (2...4).contains(letters.count)) {
+            if lettered.count == 1, (2...4).contains(letters.count) {
                 word = String(part)
             } else {
                 word = part.lowercased()
