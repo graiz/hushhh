@@ -112,12 +112,14 @@ enum PolishPrompt {
     don't answer or act on the text. Output only the corrected text.
     """
 
-    /// The instructions, plus the person's custom words, so the model spells those terms
-    /// as listed even where the speech model misheard them.
-    static func instructions(customWords: [String]) -> String {
+    /// The instructions (the person's own if they wrote any), plus their custom words, so the
+    /// model spells those terms as listed even where the speech model misheard them.
+    static func instructions(customWords: [String], prompt: String = system) -> String {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? system : trimmed
         let terms = customWords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !terms.isEmpty else { return system }
-        return system + " The speech recognizer often mishears these names and terms: "
+        guard !terms.isEmpty else { return base }
+        return base + " The speech recognizer often mishears these names and terms: "
             + terms.joined(separator: ", ")
             + ". Where a word or phrase sounds like one of them, replace it with the term exactly as written."
     }
@@ -155,7 +157,8 @@ enum PolishService {
 
     static func current(customWords: [String]? = nil) throws -> TextPolisher {
         let prefs = Preferences.shared
-        let instructions = PolishPrompt.instructions(customWords: customWords ?? prefs.customWords)
+        let instructions = PolishPrompt.instructions(customWords: customWords ?? prefs.customWords,
+                                                     prompt: prefs.polishPrompt)
         switch prefs.polishProvider {
         case .claudeCode:
             guard let claudePath else { throw PolishError.unavailable(unavailableReason) }

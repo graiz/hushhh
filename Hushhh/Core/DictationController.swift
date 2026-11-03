@@ -462,7 +462,7 @@ final class DictationController: ObservableObject {
             let firstPaste = held.text.isEmpty ? nil : self.firstPart(held.text)
             // Runs alongside the finish below; the second part waits for the app to read it.
             let firstInsert = firstPaste.map { text in
-                Task { await TextInserter.insertAndWait(text, method: self.prefs.insertion, restoringClipboard: false) }
+                Task { await TextInserter.insertAndWait(text, method: self.insertionMethod(), restoringClipboard: false) }
             }
             await live.stopPartials()
             let rest: String
@@ -492,8 +492,7 @@ final class DictationController: ObservableObject {
     /// finished, or nil when it can't go into the field (so `finishSession` handles all of it).
     private func firstPart(_ text: String) -> String? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let focus, focus.element != nil, focus.isEditable || focus.caretRect != nil,
-              focusUnchanged() else { return nil }
+        guard !text.isEmpty, let focus, canInsert(focus), focusUnchanged() else { return nil }
         return spaced(text)
     }
 
@@ -522,7 +521,7 @@ final class DictationController: ObservableObject {
                 overlay.flash(symbol: "doc.on.clipboard", text: "You switched apps — copied to clipboard", duration: 2.2)
                 break
             }
-            let second = await TextInserter.insertAndWait(text, method: prefs.insertion)
+            let second = await TextInserter.insertAndWait(text, method: insertionMethod())
             // Unread, the rest was left on the clipboard.
             if !second.wasRead { flashCopiedDictation() }
         }
@@ -560,7 +559,7 @@ final class DictationController: ObservableObject {
                 self.overlay.model.busyLabel = nil
                 self.state = .idle
                 self.overlay.hide()
-                guard let focus = self.focus, focus.isEditable, self.focusUnchanged() else {
+                guard let focus = self.focus, self.canInsert(focus), self.focusUnchanged() else {
                     TextInserter.copyToClipboard(polished)
                     self.overlay.flash(symbol: "doc.on.clipboard", text: "Polished text copied to clipboard", duration: 2.2)
                     return
@@ -591,7 +590,7 @@ final class DictationController: ObservableObject {
             overlay.flash(symbol: "waveform.slash", text: "No speech detected", duration: 1.2)
             return
         }
-        guard let focus, focus.element != nil, focus.isEditable || focus.caretRect != nil else {
+        guard let focus, canInsert(focus) else {
             TextInserter.copyToClipboard(text)
             overlay.flash(symbol: "doc.on.clipboard", text: "No text field selected — copied to clipboard", duration: 2.2)
             Sound.play(.insert)
@@ -606,7 +605,7 @@ final class DictationController: ObservableObject {
         }
         overlay.hide()
         let final = prefs.smartSpacing ? TextInserter.applySmartSpacing(text, after: focus.precedingCharacter) : text
-        TextInserter.insert(final, method: prefs.insertion) { [weak self] in self?.flashCopiedDictation() }
+        TextInserter.insert(final, method: insertionMethod()) { [weak self] in self?.flashCopiedDictation() }
         Sound.play(.insert)
     }
 
@@ -637,6 +636,25 @@ final class DictationController: ObservableObject {
     private func spaced(_ text: String) -> String {
         guard prefs.smartSpacing else { return text }
         return TextInserter.applySmartSpacing(text, after: focus?.precedingCharacter)
+    }
+
+    /// Whether dictation goes into the app. With no text field found it still does, since
+    /// some apps take typing without reporting one, unless the person chose the clipboard.
+    private func canInsert(_ focus: FocusContext) -> Bool {
+        hasTextField(focus) || !prefs.clipboardWithoutField
+    }
+
+    private func hasTextField(_ focus: FocusContext?) -> Bool {
+        guard let focus else { return false }
+        return focus.element != nil && (focus.isEditable || focus.caretRect != nil)
+    }
+
+    /// The person's insert method in a text field. Without one, always paste: typed
+    /// characters would reach the app as key presses, which can be shortcuts (a web app's
+    /// "e" to archive, Finder's type-to-select), while a paste nothing reads is left on
+    /// the clipboard.
+    private func insertionMethod() -> InsertionMethod {
+        hasTextField(focus) ? prefs.insertion : .paste
     }
 
     private func focusUnchanged() -> Bool {

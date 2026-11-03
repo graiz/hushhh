@@ -81,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // --apple polishes with Apple Intelligence for this run, using --words if given.
                     let words = Diagnostics.customWordsArgument() ?? Preferences.shared.customWords
                     let polisher: TextPolisher = CommandLine.arguments.contains("--apple")
-                        ? AppleIntelligencePolisher(instructions: PolishPrompt.instructions(customWords: words))
+                        ? AppleIntelligencePolisher(instructions: PolishPrompt.instructions(customWords: words,
+                                                                                           prompt: Preferences.shared.polishPrompt))
                         : try PolishService.current(customWords: words)
                     let result = try await polisher.polish(text)
                     print(String(format: "polished in %.1fs:\n%@", Date().timeIntervalSince(start), result))

@@ -77,6 +77,9 @@ final class Preferences: ObservableObject {
     @Published var insertion: InsertionMethod { didSet { defaults.set(insertion.rawValue, forKey: "insertion") } }
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: "playSounds") } }
     @Published var smartSpacing: Bool { didSet { defaults.set(smartSpacing, forKey: "smartSpacing") } }
+    /// Copy dictation to the clipboard when no text field is found, instead of pasting into
+    /// the app anyway. Off: some apps (Herdr) take typing but report no text field.
+    @Published var clipboardWithoutField: Bool { didSet { defaults.set(clipboardWithoutField, forKey: "clipboardWithoutField") } }
     @Published var holdToTalk: Bool { didSet { defaults.set(holdToTalk, forKey: "holdToTalk") } }
     /// Listen on every microphone when the set of microphones changes, and keep the one that hears best.
     @Published var listenOnAllMicrophones: Bool { didSet { defaults.set(listenOnAllMicrophones, forKey: "listenOnAllMicrophones") } }
@@ -103,6 +106,14 @@ final class Preferences: ObservableObject {
     }
     @Published var polishBaseURL: String { didSet { defaults.set(polishBaseURL, forKey: "polishBaseURL.\(polishProvider.rawValue)") } }
     @Published var polishModel: String { didSet { defaults.set(polishModel, forKey: "polishModel.\(polishProvider.rawValue)") } }
+    /// What Polish asks the model to do. Only saved once it differs from the built-in prompt,
+    /// so improvements to that prompt still reach anyone who never edited it.
+    @Published var polishPrompt: String {
+        didSet {
+            if polishPrompt == PolishPrompt.system { defaults.removeObject(forKey: "polishPrompt") }
+            else { defaults.set(polishPrompt, forKey: "polishPrompt") }
+        }
+    }
     /// Writes ~/Library/Logs/Hushhh/focus.log (caret positions only) for troubleshooting.
     @Published var diagnosticLog: Bool { didSet { defaults.set(diagnosticLog, forKey: "diagnosticLog") } }
     @Published var hasCompletedOnboarding: Bool { didSet { defaults.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") } }
@@ -114,6 +125,7 @@ final class Preferences: ObservableObject {
             "insertion": InsertionMethod.paste.rawValue,
             "playSounds": true,
             "smartSpacing": true,
+            "clipboardWithoutField": false,
             "holdToTalk": false,
             "listenOnAllMicrophones": true,
             "useGPU": true,
@@ -127,6 +139,7 @@ final class Preferences: ObservableObject {
         insertion = InsertionMethod(rawValue: defaults.string(forKey: "insertion") ?? "") ?? .paste
         playSounds = defaults.bool(forKey: "playSounds")
         smartSpacing = defaults.bool(forKey: "smartSpacing")
+        clipboardWithoutField = defaults.bool(forKey: "clipboardWithoutField")
         holdToTalk = defaults.bool(forKey: "holdToTalk")
         listenOnAllMicrophones = defaults.bool(forKey: "listenOnAllMicrophones")
         dictationKey = defaults.data(forKey: "dictationKey").flatMap { try? JSONDecoder().decode(DictationKey.self, from: $0) } ?? .capsLock
@@ -148,6 +161,7 @@ final class Preferences: ObservableObject {
         polishProvider = provider
         polishBaseURL = defaults.string(forKey: "polishBaseURL.\(provider.rawValue)") ?? provider.defaultBaseURL
         polishModel = defaults.string(forKey: "polishModel.\(provider.rawValue)") ?? provider.defaultModel
+        polishPrompt = defaults.string(forKey: "polishPrompt") ?? PolishPrompt.system
         diagnosticLog = defaults.bool(forKey: "diagnosticLog")
         hasCompletedOnboarding = defaults.bool(forKey: "hasCompletedOnboarding")
     }

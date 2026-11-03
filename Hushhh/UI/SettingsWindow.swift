@@ -133,12 +133,14 @@ struct TypingSettings: View {
                     ForEach(InsertionMethod.allCases) { Text($0.title).tag($0) }
                 }
                 Toggle("Add a space before dictated text when needed", isOn: $prefs.smartSpacing)
+                Toggle("Copy to clipboard when no text field is found", isOn: $prefs.clipboardWithoutField)
             } header: {
                 Text("Inserting Text")
             } footer: {
-                SettingsFooter(prefs.insertion == .paste
+                SettingsFooter((prefs.insertion == .paste
                     ? "Pasting is fastest and works in most apps; your clipboard is restored afterward."
                     : "Typing works in apps that block pasting, but is slower for long text.")
+                    + " Some apps, like terminals, take text without showing a text field, so dictation goes into the app you’re in unless you choose the clipboard.")
             }
 
             Section {
@@ -384,6 +386,21 @@ struct PolishSettings: View {
                 Toggle("Press Tab to polish dictation", isOn: $prefs.polishEnabled)
             } footer: {
                 SettingsFooter("While dictating, press Tab to finish and have a language model correct grammar, spelling and punctuation and add paragraphs. Handy for longer emails. Speech recognition always stays on this Mac; only the text you polish is sent to the provider below.")
+            }
+
+            Section {
+                TextEditor(text: $prefs.polishPrompt)
+                    .font(.body)
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+                LabeledContent("") {
+                    Button("Restore Default") { prefs.polishPrompt = PolishPrompt.system }
+                        .disabled(prefs.polishPrompt == PolishPrompt.system)
+                }
+            } header: {
+                Text("Instructions")
+            } footer: {
+                SettingsFooter("What the model is asked to do with your dictation when you press Tab. Your custom words are added to these instructions. Left empty, the default is used.")
             }
 
             Section {

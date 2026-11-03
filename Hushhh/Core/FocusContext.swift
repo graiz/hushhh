@@ -82,7 +82,7 @@ struct FocusContext {
 
     static let terminalBundleIDs: Set<String> = [
         "com.apple.Terminal", "com.mitchellh.ghostty", "com.googlecode.iterm2", "dev.warp.Warp-Stable",
-        "net.kovidgoyal.kitty", "org.alacritty", "io.alacritty", "com.github.wez.wezterm",
+        "net.kovidgoyal.kitty", "org.alacritty", "io.alacritty", "com.github.wez.wezterm", "dev.herdr.app",
     ]
 
     static let textRoles: Set<String> = [
