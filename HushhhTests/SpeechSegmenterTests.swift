@@ -161,6 +161,15 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(SpeechSegmenter.continuation(", then more.", after: "Text"), ", then more.")
     }
 
+    // MARK: engine markers
+
+    func testUnknownWordMarkersAreRemoved() {
+        XCTAssertEqual(SpeechSegmenter.withoutUnknownMarkers("Great seeing you in Boston<unk> really appreciate it."),
+                       "Great seeing you in Boston really appreciate it.")
+        XCTAssertEqual(SpeechSegmenter.withoutUnknownMarkers("<unk> Hello <unk>, there<unk>"), "Hello, there")
+        XCTAssertEqual(SpeechSegmenter.withoutUnknownMarkers("Plain text."), "Plain text.")
+    }
+
     // MARK: all caps
 
     func testAllCapsTranscriptBecomesSentenceCase() {
@@ -283,6 +292,13 @@ final class SpeechSegmenterTests: XCTestCase {
         var pause = tone(0.5, 0.0006)
         for _ in 0..<4 { pause += tone(0.06, 0.04) + voice(0.04, 0.03) + tone(0.4, 0.0006) }
         XCTAssertTrue(quiet(pause, peak: 0.02))
+    }
+
+    func testADictationWithNoSpeechIsQuiet() {
+        // Nothing said: the session's loudest is room noise (about 0.006), with a hum that
+        // is voiced and over the relative threshold. The engine hears "Thank you." in it.
+        let noise = tone(0.3, 0.004) + voice(0.3, 0.016) + tone(1.7, 0.004)
+        XCTAssertTrue(quiet(noise, peak: 0.0063))
     }
 
     func testAShortPhraseIsSpeech() {

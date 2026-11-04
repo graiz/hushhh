@@ -119,6 +119,16 @@ enum SpeechSegmenter {
         return " " + next
     }
 
+    /// `text` without the engine's "<unk>" markers, which stand for a sound it couldn't
+    /// spell, and without the spaces they leave.
+    static func withoutUnknownMarkers(_ text: String) -> String {
+        guard text.contains("<unk>") else { return text }
+        return text.replacingOccurrences(of: "<unk>", with: " ")
+            .replacingOccurrences(of: #"\s+([,.;:!?])"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// `text` in sentence case when it is all in capitals, so a short segment reads like
     /// the rest of the dictation: the engine returns some short segments in capitals, and
     /// their words are ordinary ones ("THE NEW HUSH"). Only a lone 2–4 letter word is kept,

@@ -44,6 +44,9 @@ enum TranscriptTail {
     /// speaker the threshold is near the floor, so loudness alone would count those as sound.
     /// Used only to judge filler phrases.
     static func isQuiet(_ samples: ArraySlice<Float>, sampleRate: Int, speechPeakRMS: Float) -> Bool {
+        // A session whose loudest is this quiet has no speech in it, only room noise, so the
+        // relative threshold would sit on the noise itself.
+        guard speechPeakRMS >= minSpeechLevel else { return true }
         let threshold = quietThreshold(speechPeakRMS: speechPeakRMS)
         let frame = sampleRate / 50
         guard frame > 1 else { return true }
@@ -67,6 +70,9 @@ enum TranscriptTail {
     }
     /// 200 ms of 20 ms frames.
     private static let minVoicedFrames = 10
+    /// About -41 dBFS. A dictation of room noise alone measured 0.006 and the softest real
+    /// one 0.013 (95th-percentile 50 ms loudness).
+    private static let minSpeechLevel: Float = 0.009
     /// 60 ms.
     private static let maxGapFrames = 3
 

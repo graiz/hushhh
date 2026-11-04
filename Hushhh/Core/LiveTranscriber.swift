@@ -244,14 +244,14 @@ final class LiveTranscriber {
     /// A settled segment ends inside a pause. The live region often stops right at the
     /// last word, so Hushhh adds the silence a pause would give it; a word that ends the
     /// audio is then transcribed as cleanly as one before a pause. Each pass's text is
-    /// put in sentence case if it came back all in capitals. A filler phrase ("Thanks for
+    /// cleared of the engine's "<unk>" markers and put in sentence case if it came back all in capitals. A filler phrase ("Thanks for
     /// watching.") from audio that is quiet by the relative rule is dropped, since nothing
     /// was said there; louder audio keeps every word. Then misheard terms from the person's
     /// list are corrected.
     private func transcribe(_ audio: [Float], with engine: SpeechEngine, padded: Bool,
                             speechPeak: Float) async -> (text: String, onlyNoise: Bool) {
         let input = padded ? audio + [Float](repeating: 0, count: Self.trailingSilence) : audio
-        let output = SpeechSegmenter.fixingAllCaps(await engine.transcribe(input))
+        let output = SpeechSegmenter.fixingAllCaps(SpeechSegmenter.withoutUnknownMarkers(await engine.transcribe(input)))
         let quiet = TranscriptTail.isQuiet(audio[...], sampleRate: Self.sampleRate, speechPeakRMS: speechPeak)
         // An empty pass over quiet audio counts too: there was only noise to transcribe.
         return (customWords.correct(SpeechSegmenter.kept(output, regionIsQuiet: quiet)),
