@@ -1,5 +1,4 @@
 import AppKit
-import Carbon.HIToolbox
 
 /// Inserts text into whichever app has keyboard focus.
 enum TextInserter {
@@ -106,7 +105,7 @@ enum TextInserter {
         pasteboard.writeObjects([item])
         pending = (saved, pasteboard.changeCount, promised)
 
-        postKey(CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
+        pressPaste()
         promised.postedAt = Date()
         return promised
     }
@@ -139,14 +138,13 @@ enum TextInserter {
         }
     }
 
-    private static func postKey(_ key: CGKeyCode, flags: CGEventFlags) {
+    private static func pressPaste() {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)
-        down?.flags = flags
-        up?.flags = flags
-        down?.post(tap: .cghidEventTap)
-        up?.post(tap: .cghidEventTap)
+        for step in PasteKeystrokes.events(physicallyHeld: CGEventSource.flagsState(.hidSystemState)) {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: step.key, keyDown: step.isDown)
+            event?.flags = step.flags
+            event?.post(tap: .cghidEventTap)
+        }
     }
 
     // MARK: Type as Unicode key events
