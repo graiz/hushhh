@@ -15,40 +15,41 @@ final class SpeechSegmenterTests: XCTestCase {
     // MARK: settlePoint
 
     func testPauseInTheMiddleSettlesInsideThePause() {
-        let audio = tone(3, 0.1) + tone(0.5, 0) + tone(2, 0.1)
+        let audio = tone(11, 0.1) + tone(0.5, 0) + tone(2, 0.1)
         let point = try! XCTUnwrap(settle(audio))
-        XCTAssertGreaterThanOrEqual(point, 3 * rate)
-        XCTAssertLessThanOrEqual(point, 3 * rate + rate / 2)
+        XCTAssertGreaterThanOrEqual(point, 11 * rate)
+        XCTAssertLessThanOrEqual(point, 11 * rate + rate / 2)
     }
 
     func testPauseIsFoundRelativeToTheStart() {
-        // A pause at 1 s is before the start; the next one, 3 s after it, is found.
-        let audio = tone(1, 0.1) + tone(0.5, 0) + tone(3, 0.1) + tone(0.5, 0) + tone(2, 0.1)
+        // A pause at 1 s is before the start; the next one, 11 s after it, is found.
+        let audio = tone(1, 0.1) + tone(0.5, 0) + tone(11, 0.1) + tone(0.5, 0) + tone(2, 0.1)
         let start = rate + rate / 4
         let point = try! XCTUnwrap(settle(audio, from: start))
-        XCTAssertGreaterThanOrEqual(point, Int(4.5 * Double(rate)))
-        XCTAssertLessThanOrEqual(point, 5 * rate)
+        XCTAssertGreaterThanOrEqual(point, Int(12.5 * Double(rate)))
+        XCTAssertLessThanOrEqual(point, 13 * rate)
     }
 
     func testPauseTooEarlyIsIgnored() {
-        let audio = tone(1, 0.1) + tone(0.5, 0) + tone(3, 0.1)
+        // Under 10 s in: a segment that short would give the engine too little context.
+        let audio = tone(9, 0.1) + tone(0.5, 0) + tone(3, 0.1)
         XCTAssertNil(settle(audio))
     }
 
     func testPauseTooCloseToTheEndIsIgnored() {
         // The pause ends 0.5 s before the end of the recording.
-        let audio = tone(3, 0.1) + tone(0.5, 0) + tone(0.5, 0.1)
+        let audio = tone(11, 0.1) + tone(0.5, 0) + tone(0.5, 0.1)
         XCTAssertNil(settle(audio))
     }
 
     func testShortGapIsNotAPause() {
-        let audio = tone(3, 0.1) + tone(0.2, 0) + tone(3, 0.1)
+        let audio = tone(11, 0.1) + tone(0.2, 0) + tone(3, 0.1)
         XCTAssertNil(settle(audio))
     }
 
     func testSoftSpeechIsNotAPause() {
         // 0.02 is above 0.15 × 0.1, so it's speech, not a pause.
-        let audio = tone(3, 0.1) + tone(0.5, 0.02) + tone(2, 0.1)
+        let audio = tone(11, 0.1) + tone(0.5, 0.02) + tone(2, 0.1)
         XCTAssertNil(settle(audio))
     }
 
@@ -193,6 +194,22 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(SpeechSegmenter.fixingAllCaps("PROGRAM"), "Program")
         // Acronyms the person uses come back through Custom Words.
         XCTAssertEqual(SpeechSegmenter.fixingAllCaps("TALK TO THE FBI"), "Talk to the fbi")
+    }
+
+    func testALongRunInCapitalsBecomesSentenceCase() {
+        // A longer segment can come back mostly in capitals, with a stray lowercase letter.
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("AND MANY ANGELS WILL AVOID AN LLC StRUCTURE THIS ISN'T TO SAY"),
+                       "And many angels will avoid an llc structure this isn't to say")
+        // Inside ordinary text it continues the sentence around it.
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("Number one, AND MANY ANGELS WILL AVOID THEM today."),
+                       "Number one, and many angels will avoid them today.")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("It works. I THINK SO. WE WILL GO NOW"),
+                       "It works. I think so. We will go now")
+    }
+
+    func testAFewCapitalWordsInOrdinaryTextAreKept() {
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("We use NASA FBI and CIA data."), "We use NASA FBI and CIA data.")
+        XCTAssertEqual(SpeechSegmenter.fixingAllCaps("Tell the FBI CIA NSA USA today."), "Tell the FBI CIA NSA USA today.")
     }
 
     func testASingleShortAllCapsWordIsKept() {

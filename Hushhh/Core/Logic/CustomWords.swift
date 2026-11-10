@@ -73,6 +73,9 @@ struct CustomWords {
 
     /// Up to four words, so a spelled-out acronym ("Chat G P T") is one run.
     private static let maxRun = 4
+    /// Shorter terms share their sound with ordinary words ("Lynch" and "launch", "Raiz"
+    /// and "rays"), so they're matched by spelling alone.
+    private static let minLettersToMatchBySound = 6
 
     private func bestMatch(for candidate: String) -> (term: String, score: Double)? {
         guard Self.isMatchable(candidate), candidate.count <= 50 else { return nil }
@@ -83,7 +86,8 @@ struct CustomWords {
             let longer = max(candidate.count, key.count)
             guard Double(abs(candidate.count - key.count)) <= max(Double(longer) * 0.25, 2) else { continue }
             let spelling = Double(Self.editDistance(candidate, key)) / Double(longer)
-            let soundsAlike = Self.isLetters(candidate) && Self.isLetters(key)
+            let soundsAlike = key.count >= Self.minLettersToMatchBySound
+                && Self.isLetters(candidate) && Self.isLetters(key)
                 && Self.soundex(candidate) == Self.soundex(key)
             let score = soundsAlike ? spelling * 0.3 : spelling
             if score < Self.threshold, score < (best?.score ?? .infinity) { best = (terms[index], score) }

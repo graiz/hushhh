@@ -18,8 +18,8 @@ final class LiveTranscriberTests: XCTestCase {
     /// "alpha bravo", a pause, "charlie delta", a pause, then "echo" and quiet.
     private func threeSegments() -> [Float] {
         let parts: [[Float]] = [
-            word("alpha"), quiet(0.2), word("bravo"), quiet(0.6),
-            word("charlie"), quiet(0.2), word("delta"), quiet(0.6),
+            word("alpha", 5), quiet(0.2), word("bravo", 5.5), quiet(0.6),
+            word("charlie", 5), quiet(0.2), word("delta", 5.5), quiet(0.6),
             word("echo", 0.4), quiet(1.5),
         ]
         return parts.flatMap { $0 }
@@ -93,7 +93,7 @@ final class LiveTranscriberTests: XCTestCase {
     func testEmptyPassUnderTheLimitStaysLive() async {
         // A segment the engine finds no words in, then more speech: it isn't settled as
         // nothing, so the final pass still covers it.
-        let audio = word("mumble", 2.5) + quiet(0.6) + word("alpha") + quiet(1.5)
+        let audio = word("mumble", 10.5) + quiet(0.6) + word("alpha") + quiet(1.5)
         let engine = FakeEngine()
         let live = transcriber(engine, audio: audio)
         _ = await live.update(with: engine)

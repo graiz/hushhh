@@ -7,7 +7,7 @@ final class CustomWordsTests: XCTestCase {
 
     func testExactAndMisspelledWords() {
         XCTAssertEqual(correct("hello world", ["Hello", "World"]), "Hello World")
-        XCTAssertEqual(correct("helo wrold", ["hello", "world"]), "hello world")
+        XCTAssertEqual(correct("the kuberneets cluster", ["kubernetes"]), "the kubernetes cluster")
     }
 
     func testRunsOfWordsJoinIntoOneTerm() {
@@ -32,6 +32,16 @@ final class CustomWordsTests: XCTestCase {
     func testAcronymsComeBackInCapitals() {
         XCTAssertEqual(correct("Talk to the fbi", ["FBI"]), "Talk to the FBI")
         XCTAssertEqual(correct("Nasa data", ["NASA"]), "NASA data")
+    }
+
+    func testShortTermsDontReplaceWordsThatOnlySoundAlike() {
+        XCTAssertEqual(correct("I wasn't able to use or launch the agent.", ["Lynch"]),
+                       "I wasn't able to use or launch the agent.")
+        XCTAssertEqual(correct("The sun's rays are out.", ["Raiz"]), "The sun's rays are out.")
+        XCTAssertEqual(correct("Raise the price.", ["Raiz"]), "Raise the price.")
+        XCTAssertEqual(correct("Out to lunch.", ["Lynch"]), "Out to lunch.")
+        // Spelled the same, a short term still gets its capitals.
+        XCTAssertEqual(correct("Talk to mr lynch today", ["Lynch"]), "Talk to mr Lynch today")
     }
 
     func testAmpersandTerms() {

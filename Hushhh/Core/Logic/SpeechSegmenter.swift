@@ -5,8 +5,9 @@ import Foundation
 enum SpeechSegmenter {
     /// A pause is at least this many quiet 50 ms windows in a row.
     private static let pauseWindows = 6
-    /// A segment holds at least 2 s, so each pass has enough context to transcribe well.
-    private static let minSegmentSeconds = 2
+    /// A segment holds at least 10 s, so each pass has enough context to transcribe well.
+    /// Replayed dictations had 2.5× the word errors at 2 s; at 20 s the engine invented text.
+    private static let minSegmentSeconds = 10
     /// The newest second stays live, since a pause there may just be a breath.
     private static let liveSeconds = 1
     /// Past this without a pause, settle anyway, so a pass never grows without bound.
@@ -15,7 +16,7 @@ enum SpeechSegmenter {
     private static let minForcedSegmentSeconds = 5
 
     /// Where to settle the audio, looking from `start`: the middle of the earliest pause
-    /// at least 2 s after `start` that ends at least 1 s before the end of `recording`.
+    /// at least 10 s after `start` that ends at least 1 s before the end of `recording`.
     /// Without a pause, once `recording` (the live region, from its first index) is over
     /// 25 s long, it's the quietest 50 ms window from 5 s after `start` to 1 s before the
     /// end. `start` is past the live region's start when a segment there came back empty;
@@ -135,23 +136,50 @@ enum SpeechSegmenter {
     /// as it's likely an acronym ("OK", "FBI"); acronyms in longer segments come back
     /// through Custom Words.
     static func fixingAllCaps(_ text: String) -> String {
-        let lettered = text.split(whereSeparator: \.isWhitespace).filter { $0.contains(where: \.isLetter) }
-        guard !text.contains(where: \.isLowercase) else { return text }
-        var startsSentence = true
-        let words = text.split(separator: " ", omittingEmptySubsequences: false).map { part -> String in
-            let letters = part.filter(\.isLetter)
-            var word: String
-            if lettered.count == 1, (2...4).contains(letters.count) {
-                word = String(part)
-            } else {
-                word = part.lowercased()
-                let isI = letters == "I" || word.hasPrefix("i'") || word.hasPrefix("i’")
-                if startsSentence || isI, let first = word.first { word = first.uppercased() + word.dropFirst() }
+        let parts = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard !text.contains(where: \.isLowercase) else { return fixingCapitalRuns(parts).joined(separator: " ") }
+        let lettered = parts.filter { $0.contains(where: \.isLetter) }
+        if lettered.count == 1, (2...4).contains(lettered[0].filter(\.isLetter).count) { return text }
+        return sentenceCased(parts, startingSentence: true).joined(separator: " ")
+    }
+
+    /// `parts` with each run of 5 or more words in capitals put in sentence case: a longer
+    /// segment can come back in capitals with a stray lowercase letter ("StRUCTURE"), or
+    /// partly in capitals. Fewer words in a row are likely acronyms, and are kept.
+    private static func fixingCapitalRuns(_ parts: [String]) -> [String] {
+        var parts = parts
+        var index = 0
+        while index < parts.count {
+            guard isInCapitals(parts[index]) else { index += 1; continue }
+            var end = index
+            while end < parts.count, isInCapitals(parts[end]) { end += 1 }
+            if end - index >= 5 {
+                let startsSentence = index == 0 || parts[index - 1].last.map { ".!?…".contains($0) } ?? false
+                parts.replaceSubrange(index..<end, with: sentenceCased(Array(parts[index..<end]), startingSentence: startsSentence))
             }
+            index = end
+        }
+        return parts
+    }
+
+    /// Whether at least 70% of the letters in `word` are capitals.
+    private static func isInCapitals(_ word: String) -> Bool {
+        let letters = word.filter(\.isLetter)
+        guard !letters.isEmpty else { return false }
+        return Double(letters.filter(\.isUppercase).count) >= Double(letters.count) * 0.7
+    }
+
+    /// `parts` lowercased, with capitals only at the start of a sentence and on "I".
+    private static func sentenceCased(_ parts: [String], startingSentence: Bool) -> [String] {
+        var startsSentence = startingSentence
+        return parts.map { part in
+            let letters = part.filter(\.isLetter)
+            var word = part.lowercased()
+            let isI = letters == "I" || word.hasPrefix("i'") || word.hasPrefix("i’")
+            if startsSentence || isI, let first = word.first { word = first.uppercased() + word.dropFirst() }
             if let last = word.last { startsSentence = ".!?…".contains(last) }
             return word
         }
-        return words.joined(separator: " ")
     }
 
     /// Phrases a speech model tends to produce from room noise. Only a whole transcript
